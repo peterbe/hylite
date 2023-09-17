@@ -1,0 +1,31 @@
+{
+  "name": "hylite",
+  "version": "0.0.1",
+  "description": "A command line tool for highlighting code",
+  "author": "Peter @peterbe Bengtsson",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/peterbe/hylite.git"
+  },
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "test": "echo 'not done yet'",
+    "lint": "prettier --check \"src/**/*.ts\"",
+    "prettier": "prettier --write \"src/**/*.ts\"",
+    "release": "np"
+  },
+  "devDependencies": {
+    "bun-types": "latest",
+    "np": "^8.0.4",
+    "prettier": "^3.0.3"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "commander": "^11.0.0",
+    "highlight.js": "^11.8.0"
+  }
+}
