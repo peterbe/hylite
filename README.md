@@ -7,7 +7,6 @@ A CLI for syntax highlighting code to HTML (...using
 
 ...more to come...
 
-
 ## To run
 
 ```bash
