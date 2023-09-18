@@ -8,13 +8,17 @@
     "type": "git",
     "url": "git://github.com/peterbe/hylite.git"
   },
+  "bin": {
+    "hylite": "dist/index.js"
+  },
   "module": "src/index.ts",
   "type": "module",
   "scripts": {
     "test": "echo 'not done yet'",
     "lint": "prettier --check \"src/**/*.ts\"",
     "prettier": "prettier --write \"src/**/*.ts\"",
-    "release": "np"
+    "release": "np",
+    "prerelease": "bun build ./src/index.ts --outdir=dist --outfile=index.js"
   },
   "devDependencies": {
     "bun-types": "latest",
