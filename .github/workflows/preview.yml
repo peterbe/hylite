@@ -18,6 +18,13 @@ jobs:
          cat preview.html  | grep '<html>'
          cat preview.html  | grep '<code class="hljs">'
          cat preview.html  | grep '<span class="hljs-attr">name:</span>'
+      - name: generate CSS output
+        run: |
+          bun run css > github.css
+          grep '.hljs{background:#f3f3f3;color:#444}' github.css
+          bun run css gradient-light > gradient-light.css
+          grep '.hljs{background-color:#f9ccff;background-image:linear-gradient' gradient-light.css
+          bun run list-css | grep xcode
       - name: start a preview server
         run: |
          bun run src/index.ts .github/workflows/preview.yml -p > /tmp/stdout.log 2> /tmp/stderr.log &

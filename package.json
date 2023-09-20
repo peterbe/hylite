@@ -14,6 +14,8 @@
   "module": "src/index.ts",
   "type": "module",
   "scripts": {
+    "css": "bun run src/index.ts -c",
+    "list-css": "bun run src/index.ts --list-css",
     "install:husky": "husky install",
     "test": "bun test",
     "lint": "prettier --check \"src/**/*.ts\"",

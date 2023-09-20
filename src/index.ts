@@ -39,7 +39,7 @@ if (args[0]) {
   } else {
     code = args[0];
   }
-} else if (options.listCss || options.version) {
+} else if (options.listCss || options.version || options.css) {
   // pass
 } else {
   for await (const line of console) {
