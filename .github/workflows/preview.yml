@@ -25,13 +25,14 @@ jobs:
         run: curl --retry 3 --retry-connrefused http://localhost:3000
       - name: test preview server outputs
         run: |
+         set -e
          curl http://localhost:3000 > output.html
          grep '<span class="hljs-attr">name:</span>' output.html
          grep '<style type="text/css">' output.html
          echo "Specifying a custom CSS"
          curl "http://localhost:3000?css=gradient-light" > output2.html
          cmp output.html output2.html && exit 1
-         curl --fail "http://localhost:3000?css=neverheardof" && exit 2
+         curl --fail "http://localhost:3000?css=neverheardof" && exit 2 || echo "expected to fail"
       - name: Debug server outputs on errors
         if: ${{ failure() }}
         run: |
