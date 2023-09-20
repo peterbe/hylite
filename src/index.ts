@@ -89,7 +89,7 @@ async function main(
     outputFile?: string;
     listCss?: boolean;
     version?: boolean;
-  } = {}
+  } = {},
 ) {
   if (version) {
     const packageJson = require("../package.json");
@@ -200,7 +200,7 @@ function startServer(code: string, cssName = "", port = 3000) {
             headers: new Headers({
               "Content-Type": "text/html; charset=utf-8",
             }),
-          }
+          },
         );
       }
       return new Response("not found", { status: 404 });
