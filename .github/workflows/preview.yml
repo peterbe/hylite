@@ -1,10 +1,10 @@
-name: Test
+name: Preview
 
 on:
   pull_request:
 
 jobs:
-  test:
+  preview:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
