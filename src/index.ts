@@ -204,7 +204,7 @@ function startServer(code: string, cssName = "", port = 3000) {
         );
       }
       return new Response("not found", { status: 404 });
-    },
+    }
   });
   console.log(`Now open http://localhost:${port}`);
 }

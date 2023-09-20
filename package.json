@@ -14,6 +14,7 @@
   "module": "src/index.ts",
   "type": "module",
   "scripts": {
+    "install:husky": "husky install",
     "test": "bun test",
     "lint": "prettier --check \"src/**/*.ts\"",
     "prettier": "prettier --write \"src/**/*.ts\"",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "bun-types": "latest",
+    "husky": "^8.0.3",
     "np": "^8.0.4",
     "prettier": "^3.0.3"
   },
