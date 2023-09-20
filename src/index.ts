@@ -200,7 +200,6 @@ function startServer(code: string, cssName = "", port = 3000) {
             return new Response("css file not found", { status: 400 });
           }
         }
-        console.log("AFTER");
 
         const headStyle = getHeadStyle(loadedCssName);
         return new Response(
