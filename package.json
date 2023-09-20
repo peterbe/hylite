@@ -14,11 +14,11 @@
   "module": "src/index.ts",
   "type": "module",
   "scripts": {
-    "test": "echo 'not done yet'",
+    "test": "bun test",
     "lint": "prettier --check \"src/**/*.ts\"",
     "prettier": "prettier --write \"src/**/*.ts\"",
     "release": "np",
-    "prerelease": "bun build ./src/index.ts --outdir=dist --outfile=index.js"
+    "prerelease": "bun build ./src/index.ts --outdir=dist --outfile=index.js --minify"
   },
   "devDependencies": {
     "bun-types": "latest",

@@ -4,6 +4,7 @@ import { readdir } from "fs/promises";
 import { extname } from "path";
 import { existsSync } from "fs";
 import hljs from "highlight.js";
+// import { version } from "../package.json";
 
 import { Command } from "commander";
 
@@ -16,6 +17,7 @@ program
   .option("-p, --preview-server", "Start a server to preview the output")
   .option("-o, --output-file <path>", "To file instead of stdout")
   .option("--list-css", "List possible names for CSS files and exit")
+  .option("--version", "Prints the current version")
   .argument("[string]", "string to highlight");
 
 program.parse(process.argv);
@@ -38,7 +40,7 @@ if (args[0]) {
   } else {
     code = args[0];
   }
-} else if (options.listCss) {
+} else if (options.listCss || options.version) {
   // pass
 } else {
   for await (const line of console) {
@@ -67,6 +69,7 @@ await main(code, {
   previewServer: options.previewServer,
   outputFile: options.outputFile,
   listCss: options.listCss,
+  version: options.version,
 });
 
 async function main(
@@ -78,6 +81,7 @@ async function main(
     previewServer = false,
     outputFile = "",
     listCss = false,
+    version = false,
   }: {
     htmlWrap?: boolean;
     language?: string;
@@ -85,8 +89,14 @@ async function main(
     previewServer?: boolean;
     outputFile?: string;
     listCss?: boolean;
+    version?: boolean;
   } = {},
 ) {
+  if (version) {
+    const packageJson = require("../package.json");
+    process.stdout.write(`${packageJson.version}\n`);
+    return;
+  }
   if (listCss) {
     const cssNames = await getCSSNames();
     process.stdout.write(cssNames.join("\n") + "\n");
