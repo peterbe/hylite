@@ -20,6 +20,7 @@
     "test": "bun test",
     "lint": "prettier --check \"src/**/*.ts\"",
     "prettier": "prettier --write \"src/**/*.ts\"",
+    "build": "bun run src/build.ts",
     "release": "np",
     "prerelease": "bun build ./src/index.ts --target=node --outdir=dist --outfile=index.js"
   },
