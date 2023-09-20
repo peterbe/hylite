@@ -49022,7 +49022,7 @@ var require_package = __commonJS((exports, module) => {
       prettier: "prettier --write \"src/**/*.ts\"",
       build: "bun run src/build.ts",
       release: "np",
-      prerelease: "bun build ./src/index.ts --target=node --outdir=dist --outfile=index.js"
+      prerelease: "bun run build"
     },
     devDependencies: {
       "bun-types": "latest",

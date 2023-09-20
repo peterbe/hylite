@@ -3,5 +3,6 @@
 
 set -e
 
+bun run build
 bun run prettier
 git add .
