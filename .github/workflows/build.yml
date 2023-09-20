@@ -1,0 +1,20 @@
+name: Build test
+
+on:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
+      - run: bun install
+      # You can't run `bun run build` and expect the dist/index.js to be
+      # deterministic at the moment.
+      - run: |
+         bun run dist/index.js --help
+         bun run dist/index.js --version
+         bun run dist/index.js .github/workflows/build.yml
+         bun run dist/index.js -l yml < .github/workflows/build.yml
+         cat .github/workflows/build.yml | bun run dist/index.js -l yml
