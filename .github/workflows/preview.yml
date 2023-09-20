@@ -21,12 +21,17 @@ jobs:
       - name: start a preview server
         run: |
          bun run src/index.ts .github/workflows/preview.yml -p > /tmp/stdout.log 2> /tmp/stderr.log &
-         curl --retry 3 --retry-connrefused http://localhost:3000 > output.html
+      - name: wait for server to start
+        run: curl --retry 3 --retry-connrefused http://localhost:3000
+      - name: test preview server outputs
+        run: |
+         curl http://localhost:3000 > output.html
          grep '<span class="hljs-attr">name:</span>' output.html
          grep '<style type="text/css">' output.html
+         echo "Specifying a custom CSS"
          curl "http://localhost:3000?css=gradient-light" > output2.html
          cmp output.html output2.html && exit 1
-         curl --fail "http://localhost:3000?css=neverheardof"  && exit 2
+         curl --fail "http://localhost:3000?css=neverheardof" && exit 2
       - name: Debug server outputs on errors
         if: ${{ failure() }}
         run: |
