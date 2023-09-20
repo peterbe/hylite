@@ -1,0 +1,49 @@
+name: Preview
+
+on:
+  pull_request:
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
+      - run: bun install
+      - name: make an html file
+        run: |
+         cat .github/workflows/preview.yml | bun run src/index.ts -l yml \
+           --html-wrap --output-file=preview.html
+         cat preview.html  | grep '<html>'
+         cat preview.html  | grep '<html>'
+         cat preview.html  | grep '<code class="hljs">'
+         cat preview.html  | grep '<span class="hljs-attr">name:</span>'
+      - name: generate CSS output
+        run: |
+          bun run css > github.css
+          grep '.hljs{background:#f3f3f3;color:#444}' github.css
+          bun run css gradient-light > gradient-light.css
+          grep '.hljs{background-color:#f9ccff;background-image:linear-gradient' gradient-light.css
+          bun run list-css | grep xcode
+      - name: start a preview server
+        run: |
+         bun run src/index.ts .github/workflows/preview.yml -p > /tmp/stdout.log 2> /tmp/stderr.log &
+      - name: wait for server to start
+        run: curl --retry 3 --retry-connrefused http://localhost:3000
+      - name: test preview server outputs
+        run: |
+         set -e
+         curl http://localhost:3000 > output.html
+         grep '<span class="hljs-attr">name:</span>' output.html
+         grep '<style type="text/css">' output.html
+         echo "Specifying a custom CSS"
+         curl "http://localhost:3000?css=gradient-light" > output2.html
+         cmp output.html output2.html && exit 1
+         curl --fail "http://localhost:3000?css=neverheardof" && exit 2 || echo "expected to fail"
+      - name: Debug server outputs on errors
+        if: ${{ failure() }}
+        run: |
+           echo "____STDOUT____"
+           cat /tmp/stdout.log
+           echo "____STDERR____"
+           cat /tmp/stderr.log
