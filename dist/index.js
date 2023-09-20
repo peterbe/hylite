@@ -49071,6 +49071,7 @@ var {
 
 // src/index.ts
 async function main(code, {
+  wrapped = false,
   htmlWrap = false,
   language = "",
   css = null,
@@ -49120,7 +49121,11 @@ async function main(code, {
   } else if (outputFile) {
     await Bun.write(outputFile, output);
   } else {
-    process.stdout.write(output);
+    if (wrapped) {
+      process.stdout.write(`<pre><code class="hljs">${output}</code></pre>`);
+    } else {
+      process.stdout.write(output);
+    }
   }
 }
 async function getCSS(name = "default") {
@@ -49177,7 +49182,7 @@ var startServer = function(code, cssName = "", port = 3000) {
   console.log(`Now open http://localhost:${port}`);
 };
 var program2 = new Command;
-program2.description("Highlights source code to HTML").option("-l, --language <language>", "name of language").option("-c, --css [language]", "print out the CSS").option("-w, --html-wrap", "put the output in a full HTML page").option("-p, --preview-server", "Start a server to preview the output").option("-o, --output-file <path>", "To file instead of stdout").option("--list-css", "List possible names for CSS files and exit").option("--version", "Prints the current version").argument("[string]", "string to highlight");
+program2.description("Highlights source code to HTML").option("-l, --language <language>", "name of language").option("-c, --css [language]", "print out the CSS").option("-w, --wrapped", "put the output in a full HTML page").option("--html-wrap", "put the output in a full HTML page").option("-p, --preview-server", "Start a server to preview the output").option("-o, --output-file <path>", "To file instead of stdout").option("--list-css", "List possible names for CSS files and exit").option("--version", "Prints the current version").argument("[string]", "string to highlight");
 program2.parse(process.argv);
 var options = program2.opts();
 var args = program2.args;
@@ -49214,6 +49219,7 @@ __CODE__
 </body>
 </html>`;
 await main(code, {
+  wrapped: options.wrapped,
   htmlWrap: options.htmlWrap,
   language: options.language,
   css: options.css,

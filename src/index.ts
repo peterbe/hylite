@@ -12,7 +12,8 @@ program
   .description("Highlights source code to HTML")
   .option("-l, --language <language>", "name of language")
   .option("-c, --css [language]", "print out the CSS")
-  .option("-w, --html-wrap", "put the output in a full HTML page")
+  .option("-w, --wrapped", "put the output in a full HTML page")
+  .option("--html-wrap", "put the output in a full HTML page")
   .option("-p, --preview-server", "Start a server to preview the output")
   .option("-o, --output-file <path>", "To file instead of stdout")
   .option("--list-css", "List possible names for CSS files and exit")
@@ -62,6 +63,7 @@ __CODE__
 </html>`;
 
 await main(code, {
+  wrapped: options.wrapped,
   htmlWrap: options.htmlWrap,
   language: options.language,
   css: options.css,
@@ -74,6 +76,7 @@ await main(code, {
 async function main(
   code: string,
   {
+    wrapped = false,
     htmlWrap = false,
     language = "",
     css = null,
@@ -82,6 +85,7 @@ async function main(
     listCss = false,
     version = false,
   }: {
+    wrapped?: boolean;
     htmlWrap?: boolean;
     language?: string;
     css?: null | string | boolean;
@@ -143,7 +147,11 @@ async function main(
   } else if (outputFile) {
     await Bun.write(outputFile, output);
   } else {
-    process.stdout.write(output);
+    if (wrapped) {
+      process.stdout.write(`<pre><code class="hljs">${output}</code></pre>`);
+    } else {
+      process.stdout.write(output);
+    }
   }
 }
 
