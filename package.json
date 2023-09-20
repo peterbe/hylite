@@ -18,7 +18,7 @@
     "lint": "prettier --check \"src/**/*.ts\"",
     "prettier": "prettier --write \"src/**/*.ts\"",
     "release": "np",
-    "prerelease": "bun build ./src/index.ts --outdir=dist --outfile=index.js --minify"
+    "prerelease": "bun build ./src/index.ts --target=node --outdir=dist --outfile=index.js"
   },
   "devDependencies": {
     "bun-types": "latest",

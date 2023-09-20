@@ -4,7 +4,6 @@ import { readdir } from "fs/promises";
 import { extname } from "path";
 import { existsSync } from "fs";
 import hljs from "highlight.js";
-// import { version } from "../package.json";
 
 import { Command } from "commander";
 
