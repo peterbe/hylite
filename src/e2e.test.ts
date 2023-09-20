@@ -39,9 +39,21 @@ test("code input directly as a string", async () => {
 });
 
 test("wrap the output in a simple HTML file", async () => {
-  const { stdout } = await run("alert('hello world')", "-l", "js", "-w");
+  const { stdout } = await run(
+    "alert('hello world')",
+    "-l",
+    "js",
+    "--html-wrap",
+  );
   expect(stdout).toMatch("<!doctype html>");
   expect(stdout).toMatch('<style type="text/css">');
   expect(stdout).toMatch('<code class="hljs">');
   expect(stdout).toMatch('<span class="hljs-title function_">alert</span>');
+});
+
+test("output it wrapped", async () => {
+  const { stdout } = await run("alert('hello world')", "-l", "js", "--wrapped");
+  expect(stdout).toStartWith('<pre><code class="hljs">');
+  expect(stdout).toMatch('<span class="hljs-title function_">alert</span>');
+  expect(stdout).toEndWith("</code></pre>");
 });
