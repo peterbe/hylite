@@ -33,7 +33,15 @@ test("this file by name", async () => {
   );
 });
 
-test("arbitrary code", async () => {
+test("code input directly as a string", async () => {
   const { stdout } = await run("alert('hello world')", "-l", "js");
+  expect(stdout).toMatch('<span class="hljs-title function_">alert</span>');
+});
+
+test("wrap the output in a simple HTML file", async () => {
+  const { stdout } = await run("alert('hello world')", "-l", "js", "-w");
+  expect(stdout).toMatch("<!doctype html>");
+  expect(stdout).toMatch('<style type="text/css">');
+  expect(stdout).toMatch('<code class="hljs">');
   expect(stdout).toMatch('<span class="hljs-title function_">alert</span>');
 });

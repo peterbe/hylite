@@ -1,0 +1,29 @@
+name: Test
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v1
+      - run: bun install
+      - name: make an html file
+        run: |
+         cat .github/workflows/preview.yml | bun run src/index.ts -l yml \
+           --html-wrap --output-file=preview.html
+         cat preview.html  | grep '<html>'
+         cat preview.html  | grep '<html>'
+         cat preview.html  | grep '<code class="hljs">'
+         cat preview.html  | grep '<span class="hljs-attr">name:</span>'
+      - name: start a preview server
+        run: |
+         bun run src/index.ts .github/workflows/preview.yml -p &
+         curl --retry-connrefused http://localhost:3000 > output.html
+         grep '<span class="hljs-attr">name:</span>' output.html
+         grep '<style type="text/css">' output.html
+         curl "http://localhost:3000?css=gradient-light" > output2.html
+         cmp output.html output2.html && exit 1
+         curl --fail "http://localhost:3000?css=neverheardof"  && exit 2

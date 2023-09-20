@@ -179,7 +179,7 @@ function startServer(code: string, cssName = "", port = 3000) {
       const cssNames = await getCSSNames();
       const url = new URL(req.url);
       if (url.pathname === "/") {
-        let choicesHtml = "<ul class=choices>";
+        let choicesHtml = '<ul class="choices">';
         for (const name of cssNames) {
           choicesHtml += `<li><a href="?css=${name}">${name}</a></li>`;
         }
@@ -188,7 +188,19 @@ function startServer(code: string, cssName = "", port = 3000) {
           "<style>ul.choices li { display:inline; margin-right: 5px }</style>\n";
         const loadedCssName = url.searchParams.get("css") || cssName;
 
-        const css = await getCSS(loadedCssName);
+        let css = "";
+        try {
+          css = await getCSS(loadedCssName);
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            "code" in error &&
+            error.code === "ENOENT"
+          ) {
+            return new Response("css file not found", { status: 400 });
+          }
+        }
+        console.log("AFTER");
 
         const headStyle = getHeadStyle(loadedCssName);
         return new Response(
