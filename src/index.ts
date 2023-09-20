@@ -4,7 +4,6 @@ import { readdir } from "fs/promises";
 import { extname } from "path";
 import { existsSync } from "fs";
 import hljs from "highlight.js";
-// import { version } from "../package.json";
 
 import { Command } from "commander";
 
@@ -90,7 +89,7 @@ async function main(
     outputFile?: string;
     listCss?: boolean;
     version?: boolean;
-  } = {},
+  } = {}
 ) {
   if (version) {
     const packageJson = require("../package.json");
@@ -201,7 +200,7 @@ function startServer(code: string, cssName = "", port = 3000) {
             headers: new Headers({
               "Content-Type": "text/html; charset=utf-8",
             }),
-          },
+          }
         );
       }
       return new Response("not found", { status: 404 });
