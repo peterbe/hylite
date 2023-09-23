@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import fs from "fs";
+import { readFile, writeFile } from "fs/promises";
 import { readdir } from "fs/promises";
 import { extname } from "path";
 import { existsSync } from "fs";
@@ -113,8 +114,12 @@ async function main(
   let cssContent = "";
 
   if (css && !code && !previewServer) {
-    const cssFile = Bun.file(`node_modules/highlight.js/styles/${css}.css`);
-    cssContent = await cssFile.text();
+    // const cssFile = Bun.file(`node_modules/highlight.js/styles/${css}.css`);
+    // cssContent = await cssFile.text();
+    cssContent = await readFile(
+      `node_modules/highlight.js/styles/${name}.css`,
+      "utf-8",
+    );
     process.stdout.write(cssContent);
     return;
   }
@@ -140,12 +145,12 @@ async function main(
       .replace("__CODE__", codeOutput)
       .replace("__CSS__", cssContent);
     if (outputFile) {
-      await Bun.write(outputFile, html);
+      await writeFile(outputFile, html, "utf-8");
     } else {
       process.stdout.write(html);
     }
   } else if (outputFile) {
-    await Bun.write(outputFile, output);
+    await writeFile(outputFile, output, "utf-8");
   } else {
     if (wrapped) {
       process.stdout.write(`<pre><code class="hljs">${output}</code></pre>`);
@@ -156,8 +161,7 @@ async function main(
 }
 
 async function getCSS(name = "default") {
-  const cssFile = Bun.file(`node_modules/highlight.js/styles/${name}.css`);
-  return await cssFile.text();
+  return readFile(`node_modules/highlight.js/styles/${name}.css`, "utf-8");
 }
 
 async function getCSSNames() {

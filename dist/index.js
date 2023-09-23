@@ -35,8 +35,8 @@ var require_core = __commonJS((exports, module) => {
       };
     }
     Object.freeze(obj);
-    Object.getOwnPropertyNames(obj).forEach((name) => {
-      const prop = obj[name];
+    Object.getOwnPropertyNames(obj).forEach((name2) => {
+      const prop = obj[name2];
       const type = typeof prop;
       if ((type === "object" || type === "function") && !Object.isFrozen(prop)) {
         deepFreeze(prop);
@@ -462,18 +462,18 @@ var require_core = __commonJS((exports, module) => {
   var emitsWrappingTags = (node) => {
     return !!node.scope;
   };
-  var scopeToCSSClass = (name, { prefix }) => {
-    if (name.startsWith("language:")) {
-      return name.replace("language:", "language-");
+  var scopeToCSSClass = (name2, { prefix }) => {
+    if (name2.startsWith("language:")) {
+      return name2.replace("language:", "language-");
     }
-    if (name.includes(".")) {
-      const pieces = name.split(".");
+    if (name2.includes(".")) {
+      const pieces = name2.split(".");
       return [
         `${prefix}${pieces.shift()}`,
         ...pieces.map((x, i) => `${x}${"_".repeat(i + 1)}`)
       ].join(" ");
     }
-    return `${prefix}${name}`;
+    return `${prefix}${name2}`;
   };
 
   class HTMLRenderer {
@@ -586,10 +586,10 @@ var require_core = __commonJS((exports, module) => {
     endScope() {
       this.closeNode();
     }
-    __addSublanguage(emitter, name) {
+    __addSublanguage(emitter, name2) {
       const node = emitter.root;
-      if (name)
-        node.scope = `language:${name}`;
+      if (name2)
+        node.scope = `language:${name2}`;
       this.add(node);
     }
     toHTML() {
@@ -1222,7 +1222,7 @@ var require_core = __commonJS((exports, module) => {
     function highlightAuto(code, languageSubset) {
       languageSubset = languageSubset || options.languages || Object.keys(languages);
       const plaintext = justTextHighlightResult(code);
-      const results = languageSubset.filter(getLanguage).filter(autoDetection).map((name) => _highlight(name, code, false));
+      const results = languageSubset.filter(getLanguage).filter(autoDetection).map((name2) => _highlight(name2, code, false));
       results.unshift(plaintext);
       const sorted = results.sort((a, b) => {
         if (a.relevance !== b.relevance)
@@ -1341,9 +1341,9 @@ var require_core = __commonJS((exports, module) => {
     function listLanguages() {
       return Object.keys(languages);
     }
-    function getLanguage(name) {
-      name = (name || "").toLowerCase();
-      return languages[name] || languages[aliases[name]];
+    function getLanguage(name2) {
+      name2 = (name2 || "").toLowerCase();
+      return languages[name2] || languages[aliases[name2]];
     }
     function registerAliases(aliasList, { languageName }) {
       if (typeof aliasList === "string") {
@@ -1353,8 +1353,8 @@ var require_core = __commonJS((exports, module) => {
         aliases[alias.toLowerCase()] = languageName;
       });
     }
-    function autoDetection(name) {
-      const lang = getLanguage(name);
+    function autoDetection(name2) {
+      const lang = getLanguage(name2);
       return lang && !lang.disableAutodetect;
     }
     function upgradePluginAPI(plugin) {
@@ -20618,9 +20618,9 @@ var require_less = __commonJS((exports, module) => {
         begin: "~?" + c + ".*?" + c
       };
     };
-    const IDENT_MODE = function(name, begin, relevance) {
+    const IDENT_MODE = function(name2, begin, relevance) {
       return {
-        className: name,
+        className: name2,
         begin,
         relevance
       };
@@ -47268,25 +47268,25 @@ var require_argument = __commonJS((exports) => {
   var { InvalidArgumentError } = require_error();
 
   class Argument {
-    constructor(name, description) {
+    constructor(name2, description) {
       this.description = description || "";
       this.variadic = false;
       this.parseArg = undefined;
       this.defaultValue = undefined;
       this.defaultValueDescription = undefined;
       this.argChoices = undefined;
-      switch (name[0]) {
+      switch (name2[0]) {
         case "<":
           this.required = true;
-          this._name = name.slice(1, -1);
+          this._name = name2.slice(1, -1);
           break;
         case "[":
           this.required = false;
-          this._name = name.slice(1, -1);
+          this._name = name2.slice(1, -1);
           break;
         default:
           this.required = true;
-          this._name = name;
+          this._name = name2;
           break;
       }
       if (this._name.length > 3 && this._name.slice(-3) === "...") {
@@ -47646,8 +47646,8 @@ var require_option = __commonJS((exports) => {
       this.implied = Object.assign(this.implied || {}, newImplied);
       return this;
     }
-    env(name) {
-      this.envVar = name;
+    env(name2) {
+      this.envVar = name2;
       return this;
     }
     argParser(fn) {
@@ -47858,7 +47858,7 @@ var require_command = __commonJS((exports) => {
   var { suggestSimilar } = require_suggestSimilar();
 
   class Command extends EventEmitter {
-    constructor(name) {
+    constructor(name2) {
       super();
       this.commands = [];
       this.options = [];
@@ -47870,7 +47870,7 @@ var require_command = __commonJS((exports) => {
       this.rawArgs = [];
       this.processedArgs = [];
       this._scriptPath = null;
-      this._name = name || "";
+      this._name = name2 || "";
       this._optionValues = {};
       this._optionValueSources = {};
       this._storeOptionsAsProperties = false;
@@ -47937,8 +47937,8 @@ var require_command = __commonJS((exports) => {
         desc = null;
       }
       opts = opts || {};
-      const [, name, args] = nameAndArgs.match(/([^ ]+) *(.*)/);
-      const cmd = this.createCommand(name);
+      const [, name2, args] = nameAndArgs.match(/([^ ]+) *(.*)/);
+      const cmd = this.createCommand(name2);
       if (desc) {
         cmd.description(desc);
         cmd._executableHandler = true;
@@ -47956,8 +47956,8 @@ var require_command = __commonJS((exports) => {
         return this;
       return cmd;
     }
-    createCommand(name) {
-      return new Command(name);
+    createCommand(name2) {
+      return new Command(name2);
     }
     createHelp() {
       return Object.assign(new Help, this.configureHelp());
@@ -47998,11 +47998,11 @@ var require_command = __commonJS((exports) => {
       cmd.parent = this;
       return this;
     }
-    createArgument(name, description) {
-      return new Argument(name, description);
+    createArgument(name2, description) {
+      return new Argument(name2, description);
     }
-    argument(name, description, fn, defaultValue) {
-      const argument = this.createArgument(name, description);
+    argument(name2, description, fn, defaultValue) {
+      const argument = this.createArgument(name2, description);
       if (typeof fn === "function") {
         argument.default(defaultValue).argParser(fn);
       } else {
@@ -48099,21 +48099,21 @@ Expecting one of '${allowedValues.join("', '")}'`);
     }
     addOption(option) {
       const oname = option.name();
-      const name = option.attributeName();
+      const name2 = option.attributeName();
       if (option.negate) {
         const positiveLongFlag = option.long.replace(/^--no-/, "--");
         if (!this._findOption(positiveLongFlag)) {
-          this.setOptionValueWithSource(name, option.defaultValue === undefined ? true : option.defaultValue, "default");
+          this.setOptionValueWithSource(name2, option.defaultValue === undefined ? true : option.defaultValue, "default");
         }
       } else if (option.defaultValue !== undefined) {
-        this.setOptionValueWithSource(name, option.defaultValue, "default");
+        this.setOptionValueWithSource(name2, option.defaultValue, "default");
       }
       this.options.push(option);
       const handleOptionValue = (val, invalidValueMessage, valueSource) => {
         if (val == null && option.presetArg !== undefined) {
           val = option.presetArg;
         }
-        const oldValue = this.getOptionValue(name);
+        const oldValue = this.getOptionValue(name2);
         if (val !== null && option.parseArg) {
           try {
             val = option.parseArg(val, oldValue);
@@ -48136,7 +48136,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
             val = "";
           }
         }
-        this.setOptionValueWithSource(name, val, valueSource);
+        this.setOptionValueWithSource(name2, val, valueSource);
       };
       this.on("option:" + oname, (val) => {
         const invalidValueMessage = `error: option '${option.flags}' argument '${val}' is invalid.`;
@@ -48557,10 +48557,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
         this._processArguments();
       }
     }
-    _findCommand(name) {
-      if (!name)
+    _findCommand(name2) {
+      if (!name2)
         return;
-      return this.commands.find((cmd) => cmd._name === name || cmd._aliases.includes(name));
+      return this.commands.find((cmd) => cmd._name === name2 || cmd._aliases.includes(name2));
     }
     _findOption(arg) {
       return this.options.find((option) => option.is(arg));
@@ -48742,8 +48742,8 @@ Expecting one of '${allowedValues.join("', '")}'`);
         });
       });
     }
-    missingArgument(name) {
-      const message = `error: missing required argument '${name}'`;
+    missingArgument(name2) {
+      const message = `error: missing required argument '${name2}'`;
       this.error(message, { code: "commander.missingArgument" });
     }
     optionMissingArgument(option) {
@@ -49047,6 +49047,7 @@ var require_package = __commonJS((exports, module) => {
 
 // src/index.ts
 import fs from "fs";
+import {readFile, writeFile} from "fs/promises";
 import {readdir} from "fs/promises";
 import {extname} from "path";
 import {existsSync} from "fs";
@@ -49097,8 +49098,7 @@ async function main(code, {
   }
   let cssContent = "";
   if (css && !code && !previewServer) {
-    const cssFile = Bun.file(`node_modules/highlight.js/styles/${css}.css`);
-    cssContent = await cssFile.text();
+    cssContent = await readFile(`node_modules/highlight.js/styles/${name}.css`, "utf-8");
     process.stdout.write(cssContent);
     return;
   }
@@ -49116,12 +49116,12 @@ async function main(code, {
     const headStyle = getHeadStyle(cssName);
     const html = HTML_TEMPLATE.replace("</head>", `${headStyle}</head>`).replace("__CODE__", codeOutput).replace("__CSS__", cssContent2);
     if (outputFile) {
-      await Bun.write(outputFile, html);
+      await writeFile(outputFile, html, "utf-8");
     } else {
       process.stdout.write(html);
     }
   } else if (outputFile) {
-    await Bun.write(outputFile, output);
+    await writeFile(outputFile, output, "utf-8");
   } else {
     if (wrapped) {
       process.stdout.write(`<pre><code class="hljs">${output}</code></pre>`);
@@ -49130,9 +49130,8 @@ async function main(code, {
     }
   }
 }
-async function getCSS(name = "default") {
-  const cssFile = Bun.file(`node_modules/highlight.js/styles/${name}.css`);
-  return await cssFile.text();
+async function getCSS(name2 = "default") {
+  return readFile(`node_modules/highlight.js/styles/${name2}.css`, "utf-8");
 }
 async function getCSSNames() {
   const cssFiles = (await readdir("node_modules/highlight.js/styles")).filter((f) => f.endsWith(".css")).sort((a, b) => a.localeCompare(b));
@@ -49157,8 +49156,8 @@ var startServer = function(code, cssName = "", port = 3000) {
       const url = new URL(req.url);
       if (url.pathname === "/") {
         let choicesHtml = '<ul class="choices">';
-        for (const name of cssNames) {
-          choicesHtml += `<li><a href="?css=${name}">${name}</a></li>`;
+        for (const name2 of cssNames) {
+          choicesHtml += `<li><a href="?css=${name2}">${name2}</a></li>`;
         }
         choicesHtml += "</ul>\n<hr>\n";
         const choicesStyle = "<style>ul.choices li { display:inline; margin-right: 5px }</style>\n";
