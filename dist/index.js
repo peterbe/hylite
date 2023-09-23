@@ -49046,6 +49046,7 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/index.ts
+import fs from "fs";
 import {readdir} from "fs/promises";
 import {extname} from "path";
 import {existsSync} from "fs";
@@ -49202,9 +49203,8 @@ if (args[0]) {
   }
 } else if (options.listCss || options.version || options.css) {
 } else {
-  for await (const line of console) {
-    code += line + "\n";
-  }
+  const stdinBuffer = fs.readFileSync(0);
+  code = stdinBuffer.toString();
 }
 var HTML_TEMPLATE = `<!doctype html>
 <html>
