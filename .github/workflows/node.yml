@@ -14,4 +14,6 @@ jobs:
       - run: npm ci
       - run: node src/index.js --help
       - run: node src/index.js --version
-      - run: node src/index.js < .github/workflows/node.yml
+      - run: node src/index.js .github/workflows/node.yml
+      - run: node src/index.js -l bash 'export TOKEN=value'
+      - run: node src/index.js -l yml < .github/workflows/node.yml
