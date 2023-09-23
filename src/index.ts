@@ -114,10 +114,8 @@ async function main(
   let cssContent = "";
 
   if (css && !code && !previewServer) {
-    // const cssFile = Bun.file(`node_modules/highlight.js/styles/${css}.css`);
-    // cssContent = await cssFile.text();
     cssContent = await readFile(
-      `node_modules/highlight.js/styles/${name}.css`,
+      `node_modules/highlight.js/styles/${css}.css`,
       "utf-8",
     );
     process.stdout.write(cssContent);
