@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { createRequire as createImportMetaRequire } from "module"; import.meta.require ||= (id) => createImportMetaRequire(import.meta.url)(id);
 // @bun
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -49045,6 +49046,8 @@ var require_package = __commonJS((exports, module) => {
 });
 
 // src/index.ts
+import fs from "fs";
+import {readFile, writeFile} from "fs/promises";
 import {readdir} from "fs/promises";
 import {extname} from "path";
 import {existsSync} from "fs";
@@ -49095,8 +49098,7 @@ async function main(code, {
   }
   let cssContent = "";
   if (css && !code && !previewServer) {
-    const cssFile = Bun.file(`node_modules/highlight.js/styles/${css}.css`);
-    cssContent = await cssFile.text();
+    cssContent = await readFile(`node_modules/highlight.js/styles/${css}.css`, "utf-8");
     process.stdout.write(cssContent);
     return;
   }
@@ -49114,12 +49116,12 @@ async function main(code, {
     const headStyle = getHeadStyle(cssName);
     const html = HTML_TEMPLATE.replace("</head>", `${headStyle}</head>`).replace("__CODE__", codeOutput).replace("__CSS__", cssContent2);
     if (outputFile) {
-      await Bun.write(outputFile, html);
+      await writeFile(outputFile, html, "utf-8");
     } else {
       process.stdout.write(html);
     }
   } else if (outputFile) {
-    await Bun.write(outputFile, output);
+    await writeFile(outputFile, output, "utf-8");
   } else {
     if (wrapped) {
       process.stdout.write(`<pre><code class="hljs">${output}</code></pre>`);
@@ -49129,8 +49131,7 @@ async function main(code, {
   }
 }
 async function getCSS(name = "default") {
-  const cssFile = Bun.file(`node_modules/highlight.js/styles/${name}.css`);
-  return await cssFile.text();
+  return readFile(`node_modules/highlight.js/styles/${name}.css`, "utf-8");
 }
 async function getCSSNames() {
   const cssFiles = (await readdir("node_modules/highlight.js/styles")).filter((f) => f.endsWith(".css")).sort((a, b) => a.localeCompare(b));
@@ -49195,15 +49196,14 @@ if (args[0]) {
         options.language = ext.slice(1);
       }
     }
-    code = await Bun.file(args[0]).text();
+    code = fs.readFileSync(args[0], "utf8");
   } else {
     code = args[0];
   }
 } else if (options.listCss || options.version || options.css) {
 } else {
-  for await (const line of console) {
-    code += line + "\n";
-  }
+  const stdinBuffer = fs.readFileSync(0);
+  code = stdinBuffer.toString();
 }
 var HTML_TEMPLATE = `<!doctype html>
 <html>
