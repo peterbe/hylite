@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { createRequire as createImportMetaRequire } from "module"; import.meta.require ||= (id) => createImportMetaRequire(import.meta.url)(id);
 // @bun
 var __create = Object.create;
 var __defProp = Object.defineProperty;
