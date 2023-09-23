@@ -37,7 +37,7 @@ if (args[0]) {
         options.language = ext.slice(1);
       }
     }
-    code = await Bun.file(args[0]).text();
+    code = fs.readFileSync(args[0], "utf8");
   } else {
     code = args[0];
   }
