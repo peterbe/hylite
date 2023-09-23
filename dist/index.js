@@ -49000,7 +49000,7 @@ var require_commander = __commonJS((exports, module) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "hylite",
-    version: "0.1.0",
+    version: "0.3.0",
     description: "A command line tool for highlighting code",
     author: "Peter @peterbe Bengtsson",
     license: "MIT",
@@ -49014,14 +49014,19 @@ var require_package = __commonJS((exports, module) => {
     module: "src/index.ts",
     type: "module",
     scripts: {
+      css: "bun run src/index.ts -c",
+      "list-css": "bun run src/index.ts --list-css",
+      "install:husky": "husky install",
       test: "bun test",
       lint: "prettier --check \"src/**/*.ts\"",
       prettier: "prettier --write \"src/**/*.ts\"",
+      build: "bun run src/build.ts",
       release: "np",
-      prerelease: "bun build ./src/index.ts --target=node --outdir=dist --outfile=index.js"
+      prerelease: "bun run build"
     },
     devDependencies: {
       "bun-types": "latest",
+      husky: "^8.0.3",
       np: "^8.0.4",
       prettier: "^3.0.3"
     },
@@ -49066,6 +49071,7 @@ var {
 
 // src/index.ts
 async function main(code, {
+  wrapped = false,
   htmlWrap = false,
   language = "",
   css = null,
@@ -49115,7 +49121,11 @@ async function main(code, {
   } else if (outputFile) {
     await Bun.write(outputFile, output);
   } else {
-    process.stdout.write(output);
+    if (wrapped) {
+      process.stdout.write(`<pre><code class="hljs">${output}</code></pre>`);
+    } else {
+      process.stdout.write(output);
+    }
   }
 }
 async function getCSS(name = "default") {
@@ -49144,14 +49154,21 @@ var startServer = function(code, cssName = "", port = 3000) {
       const cssNames = await getCSSNames();
       const url = new URL(req.url);
       if (url.pathname === "/") {
-        let choicesHtml = "<ul class=choices>";
+        let choicesHtml = '<ul class="choices">';
         for (const name of cssNames) {
           choicesHtml += `<li><a href="?css=${name}">${name}</a></li>`;
         }
         choicesHtml += "</ul>\n<hr>\n";
         const choicesStyle = "<style>ul.choices li { display:inline; margin-right: 5px }</style>\n";
         const loadedCssName = url.searchParams.get("css") || cssName;
-        const css = await getCSS(loadedCssName);
+        let css = "";
+        try {
+          css = await getCSS(loadedCssName);
+        } catch (error) {
+          if (error instanceof Error && ("code" in error) && error.code === "ENOENT") {
+            return new Response("css file not found", { status: 400 });
+          }
+        }
         const headStyle = getHeadStyle(loadedCssName);
         return new Response(HTML_TEMPLATE.replace("</head>", `${headStyle}${choicesStyle}</head>`).replace("<body>", `<body>${choicesHtml}`).replace("__CODE__", code).replace("__CSS__", css), {
           headers: new Headers({
@@ -49165,7 +49182,7 @@ var startServer = function(code, cssName = "", port = 3000) {
   console.log(`Now open http://localhost:${port}`);
 };
 var program2 = new Command;
-program2.description("Highlights source code to HTML").option("-l, --language <language>", "name of language").option("-c, --css [language]", "print out the CSS").option("-w, --html-wrap", "put the output in a full HTML page").option("-p, --preview-server", "Start a server to preview the output").option("-o, --output-file <path>", "To file instead of stdout").option("--list-css", "List possible names for CSS files and exit").option("--version", "Prints the current version").argument("[string]", "string to highlight");
+program2.description("Highlights source code to HTML").option("-l, --language <language>", "name of language").option("-c, --css [language]", "print out the CSS").option("-w, --wrapped", "put the output in a full HTML page").option("--html-wrap", "put the output in a full HTML page").option("-p, --preview-server", "Start a server to preview the output").option("-o, --output-file <path>", "To file instead of stdout").option("--list-css", "List possible names for CSS files and exit").option("--version", "Prints the current version").argument("[string]", "string to highlight");
 program2.parse(process.argv);
 var options = program2.opts();
 var args = program2.args;
@@ -49182,7 +49199,7 @@ if (args[0]) {
   } else {
     code = args[0];
   }
-} else if (options.listCss || options.version) {
+} else if (options.listCss || options.version || options.css) {
 } else {
   for await (const line of console) {
     code += line + "\n";
@@ -49202,6 +49219,7 @@ __CODE__
 </body>
 </html>`;
 await main(code, {
+  wrapped: options.wrapped,
   htmlWrap: options.htmlWrap,
   language: options.language,
   css: options.css,

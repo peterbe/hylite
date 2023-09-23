@@ -1,6 +1,6 @@
 {
   "name": "hylite",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "A command line tool for highlighting code",
   "author": "Peter @peterbe Bengtsson",
   "license": "MIT",
@@ -14,14 +14,19 @@
   "module": "src/index.ts",
   "type": "module",
   "scripts": {
+    "css": "bun run src/index.ts -c",
+    "list-css": "bun run src/index.ts --list-css",
+    "install:husky": "husky install",
     "test": "bun test",
     "lint": "prettier --check \"src/**/*.ts\"",
     "prettier": "prettier --write \"src/**/*.ts\"",
+    "build": "bun run src/build.ts",
     "release": "np",
-    "prerelease": "bun build ./src/index.ts --target=node --outdir=dist --outfile=index.js"
+    "prerelease": "bun run build"
   },
   "devDependencies": {
     "bun-types": "latest",
+    "husky": "^8.0.3",
     "np": "^8.0.4",
     "prettier": "^3.0.3"
   },
