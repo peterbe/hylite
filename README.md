@@ -85,6 +85,8 @@ to wrap it in:
 </pre>
 ```
 
+## HTML wrap
+
 `hylite` can take care of that for you with `--wrapped` (or `-w`). For example:
 
 ```bash
@@ -200,3 +202,46 @@ bun run release
 
 This will execute `bun run build` and if that `dist/index.js` becomes
 different, the release process is halted.
+
+## Caveats and goals
+
+### Standalone executable
+
+I hope some day to use `bun build` to compile a standalone executable
+that is portable to any OS. Then this CLI can be shipped in the likes
+of Debian sources or Homebrew. At the moment, the build artifact works
+but only on macOS (where I'm testing this):
+
+```bash
+❯ bun build --compile --outfile hylite-executable src/index.ts
+  [24ms]  bundle  205 modules
+ [222ms] compile  hylite-executable
+ ...
+
+❯ ls -lh hylite-executable
+-rwxrwxrwx  1 peterbe  staff    55M Sep 24 14:47 hylite-executable
+
+❯ ./hylite-executable /tmp/throwaway/health.json
+<span class="hljs-punctuation">{</span><span class="hljs-attr">&quot;ok&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">true</span></span><span class="hljs-punctuation">,</span> <span class="hljs-attr">&quot;error&quot;</span><span class="hljs-punctuation">:</span> <span class="hljs-literal"><span class="hljs-keyword">null</span></span><span class="hljs-punctuation">}</span>
+```
+
+### API
+
+At the moment, `hylite` only exists as a CLI. If you want to execute it
+as an install dependency API, this is currently not supported. Technically,
+`hylite` is a client of [`highlight.js`](https://highlightjs.org/#usage).
+
+But let's chat if you can think this would be useful. All we need to
+do is rearrange the code in `src/index.ts` a bit so that its core is
+plucked out into its own ESM exported function. The `src/index.ts`
+could be just the CLI part.
+
+### Guessing the syntax
+
+When you run `hylite myfile.rb` it can deduce the Ruby language from the
+file extension. But if you use `cat myfile.rb | hylite` it can't know the
+language so you have to use `cat myfile.rb | hylite -l rb`.
+
+But `highlight.js` has a decent API for guessing called `hljs.highlightAuto`
+which could be used. Let me know if you want to help out add this
+functionality.
