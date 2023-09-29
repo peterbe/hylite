@@ -1,0 +1,6 @@
+preview-server.png
+bun.lockb
+.husky/pre-commit
+.github/
+src/build.ts
+src/e2e.test.ts
