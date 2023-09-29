@@ -49001,7 +49001,7 @@ var require_commander = __commonJS((exports, module) => {
 var require_package = __commonJS((exports, module) => {
   module.exports = {
     name: "hylite",
-    version: "1.0.0",
+    version: "1.0.1",
     description: "A command line tool for highlighting code",
     author: "Peter @peterbe Bengtsson",
     license: "MIT",
