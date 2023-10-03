@@ -3,6 +3,9 @@
 A CLI for syntax highlighting code to HTML (...using
 [highlight.js](https://www.npmjs.com/package/highlight.js) under the hood).
 
+**See this blog post for an introduction about what this is**:
+[www.peterbe.com/plog/introducing-hylite](https://www.peterbe.com/plog/introducing-hylite)
+
 ## To run
 
 ### Not installed
