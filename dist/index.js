@@ -685,22 +685,18 @@ var require_core = __commonJS((exports, module) => {
     relevance: 0
   };
   var REGEXP_MODE = {
-    begin: /(?=\/[^/\n]*\/)/,
-    contains: [{
-      scope: "regexp",
-      begin: /\//,
-      end: /\/[gimuy]*/,
-      illegal: /\n/,
-      contains: [
-        BACKSLASH_ESCAPE,
-        {
-          begin: /\[/,
-          end: /\]/,
-          relevance: 0,
-          contains: [BACKSLASH_ESCAPE]
-        }
-      ]
-    }]
+    scope: "regexp",
+    begin: /\/(?=[^/\n]*\/)/,
+    end: /\/[gimuy]*/,
+    contains: [
+      BACKSLASH_ESCAPE,
+      {
+        begin: /\[/,
+        end: /\]/,
+        relevance: 0,
+        contains: [BACKSLASH_ESCAPE]
+      }
+    ]
   };
   var TITLE_MODE = {
     scope: "title",
@@ -729,30 +725,30 @@ var require_core = __commonJS((exports, module) => {
   };
   var MODES = Object.freeze({
     __proto__: null,
-    MATCH_NOTHING_RE,
-    IDENT_RE,
-    UNDERSCORE_IDENT_RE,
-    NUMBER_RE,
-    C_NUMBER_RE,
+    APOS_STRING_MODE,
+    BACKSLASH_ESCAPE,
+    BINARY_NUMBER_MODE,
     BINARY_NUMBER_RE,
+    COMMENT,
+    C_BLOCK_COMMENT_MODE,
+    C_LINE_COMMENT_MODE,
+    C_NUMBER_MODE,
+    C_NUMBER_RE,
+    END_SAME_AS_BEGIN,
+    HASH_COMMENT_MODE,
+    IDENT_RE,
+    MATCH_NOTHING_RE,
+    METHOD_GUARD,
+    NUMBER_MODE,
+    NUMBER_RE,
+    PHRASAL_WORDS_MODE,
+    QUOTE_STRING_MODE,
+    REGEXP_MODE,
     RE_STARTERS_RE,
     SHEBANG,
-    BACKSLASH_ESCAPE,
-    APOS_STRING_MODE,
-    QUOTE_STRING_MODE,
-    PHRASAL_WORDS_MODE,
-    COMMENT,
-    C_LINE_COMMENT_MODE,
-    C_BLOCK_COMMENT_MODE,
-    HASH_COMMENT_MODE,
-    NUMBER_MODE,
-    C_NUMBER_MODE,
-    BINARY_NUMBER_MODE,
-    REGEXP_MODE,
     TITLE_MODE,
-    UNDERSCORE_TITLE_MODE,
-    METHOD_GUARD,
-    END_SAME_AS_BEGIN
+    UNDERSCORE_IDENT_RE,
+    UNDERSCORE_TITLE_MODE
   });
   var beforeMatchExt = (mode, parent) => {
     if (!mode.beforeMatch)
@@ -802,7 +798,7 @@ var require_core = __commonJS((exports, module) => {
     seenDeprecations[`${version2}/${message}`] = true;
   };
   var MultiClassError = new Error;
-  var version = "11.8.0";
+  var version = "11.9.0";
 
   class HTMLInjectionError extends Error {
     constructor(reason, html) {
@@ -1252,6 +1248,10 @@ var require_core = __commonJS((exports, module) => {
       if (shouldNotHighlight(language))
         return;
       fire("before:highlightElement", { el: element, language });
+      if (element.dataset.highlighted) {
+        console.log("Element previously highlighted. To highlight again, first unset `dataset.highlighted`.", element);
+        return;
+      }
       if (element.children.length > 0) {
         if (!options.ignoreUnescapedHTML) {
           console.warn("One of your code blocks includes unescaped HTML. This is a potentially serious security risk.");
@@ -1268,6 +1268,7 @@ var require_core = __commonJS((exports, module) => {
       const text = node.textContent;
       const result = language ? highlight2(text, { language, ignoreIllegals: true }) : highlightAuto(text);
       element.innerHTML = result.value;
+      element.dataset.highlighted = "yes";
       updateClassName(element, language, result.language);
       element.result = {
         language: result.language,
@@ -3684,7 +3685,7 @@ var require_armasm = __commonJS((exports, module) => {
       keywords: {
         $pattern: "\\.?" + hljs.IDENT_RE,
         meta: ".2byte .4byte .align .ascii .asciz .balign .byte .code .data .else .end .endif .endm .endr .equ .err .exitm .extern .global .hword .if .ifdef .ifndef .include .irp .long .macro .rept .req .section .set .skip .space .text .word .arm .thumb .code16 .code32 .force_thumb .thumb_func .ltorg ALIAS ALIGN ARM AREA ASSERT ATTR CN CODE CODE16 CODE32 COMMON CP DATA DCB DCD DCDU DCDO DCFD DCFDU DCI DCQ DCQU DCW DCWU DN ELIF ELSE END ENDFUNC ENDIF ENDP ENTRY EQU EXPORT EXPORTAS EXTERN FIELD FILL FUNCTION GBLA GBLL GBLS GET GLOBAL IF IMPORT INCBIN INCLUDE INFO KEEP LCLA LCLL LCLS LTORG MACRO MAP MEND MEXIT NOFP OPT PRESERVE8 PROC QN READONLY RELOC REQUIRE REQUIRE8 RLIST FN ROUT SETA SETL SETS SN SPACE SUBT THUMB THUMBX TTL WHILE WEND ",
-        built_in: "r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 pc lr sp ip sl sb fp a1 a2 a3 a4 v1 v2 v3 v4 v5 v6 v7 v8 f0 f1 f2 f3 f4 f5 f6 f7 p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 q10 q11 q12 q13 q14 q15 cpsr_c cpsr_x cpsr_s cpsr_f cpsr_cx cpsr_cxs cpsr_xs cpsr_xsf cpsr_sf cpsr_cxsf spsr_c spsr_x spsr_s spsr_f spsr_cx spsr_cxs spsr_xs spsr_xsf spsr_sf spsr_cxsf s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18 s19 s20 s21 s22 s23 s24 s25 s26 s27 s28 s29 s30 s31 d0 d1 d2 d3 d4 d5 d6 d7 d8 d9 d10 d11 d12 d13 d14 d15 d16 d17 d18 d19 d20 d21 d22 d23 d24 d25 d26 d27 d28 d29 d30 d31 {PC} {VAR} {TRUE} {FALSE} {OPT} {CONFIG} {ENDIAN} {CODESIZE} {CPU} {FPU} {ARCHITECTURE} {PCSTOREOFFSET} {ARMASM_VERSION} {INTER} {ROPI} {RWPI} {SWST} {NOSWST} . @"
+        built_in: "r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 w0 w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 w17 w18 w19 w20 w21 w22 w23 w24 w25 w26 w27 w28 w29 w30 x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11 x12 x13 x14 x15 x16 x17 x18 x19 x20 x21 x22 x23 x24 x25 x26 x27 x28 x29 x30 pc lr sp ip sl sb fp a1 a2 a3 a4 v1 v2 v3 v4 v5 v6 v7 v8 f0 f1 f2 f3 f4 f5 f6 f7 p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 c0 c1 c2 c3 c4 c5 c6 c7 c8 c9 c10 c11 c12 c13 c14 c15 q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 q10 q11 q12 q13 q14 q15 cpsr_c cpsr_x cpsr_s cpsr_f cpsr_cx cpsr_cxs cpsr_xs cpsr_xsf cpsr_sf cpsr_cxsf spsr_c spsr_x spsr_s spsr_f spsr_cx spsr_cxs spsr_xs spsr_xsf spsr_sf spsr_cxsf s0 s1 s2 s3 s4 s5 s6 s7 s8 s9 s10 s11 s12 s13 s14 s15 s16 s17 s18 s19 s20 s21 s22 s23 s24 s25 s26 s27 s28 s29 s30 s31 d0 d1 d2 d3 d4 d5 d6 d7 d8 d9 d10 d11 d12 d13 d14 d15 d16 d17 d18 d19 d20 d21 d22 d23 d24 d25 d26 d27 d28 d29 d30 d31 {PC} {VAR} {TRUE} {FALSE} {OPT} {CONFIG} {ENDIAN} {CODESIZE} {CPU} {FPU} {ARCHITECTURE} {PCSTOREOFFSET} {ARMASM_VERSION} {INTER} {ROPI} {RWPI} {SWST} {NOSWST} . @"
       },
       contains: [
         {
@@ -4903,13 +4904,15 @@ var require_bash = __commonJS((exports, module) => {
     };
     SUBST.contains.push(QUOTE_STRING);
     const ESCAPED_QUOTE = {
-      className: "",
-      begin: /\\"/
+      match: /\\"/
     };
     const APOS_STRING = {
       className: "string",
       begin: /'/,
       end: /'/
+    };
+    const ESCAPED_APOS = {
+      match: /\\'/
     };
     const ARITHMETIC = {
       begin: /\$?\(\(/,
@@ -5210,6 +5213,7 @@ var require_bash = __commonJS((exports, module) => {
         QUOTE_STRING,
         ESCAPED_QUOTE,
         APOS_STRING,
+        ESCAPED_APOS,
         VAR
       ]
     };
@@ -8702,7 +8706,7 @@ var require_css = __commonJS((exports, module) => {
       },
       CSS_VARIABLE: {
         className: "attr",
-        begin: /--[A-Za-z][A-Za-z0-9_-]*/
+        begin: /--[A-Za-z_][A-Za-z0-9_-]*/
       }
     };
   };
@@ -17148,7 +17152,7 @@ var require_groovy = __commonJS((exports, module) => {
     ], { className: "string" });
     const CLASS_DEFINITION = {
       match: [
-        /(class|interface|trait|enum|extends|implements)/,
+        /(class|interface|trait|enum|record|extends|implements)/,
         /\s+/,
         hljs.UNDERSCORE_IDENT_RE
       ],
@@ -17206,7 +17210,8 @@ var require_groovy = __commonJS((exports, module) => {
       "import",
       "package",
       "return",
-      "instanceof"
+      "instanceof",
+      "var"
     ];
     return {
       name: "Groovy",
@@ -17568,8 +17573,16 @@ var require_handlebars = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/haskell.js
 var require_haskell = __commonJS((exports, module) => {
   var haskell = function(hljs) {
+    const decimalDigits = "([0-9]_*)+";
+    const hexDigits = "([0-9a-fA-F]_*)+";
+    const binaryDigits = "([01]_*)+";
+    const octalDigits = "([0-7]_*)+";
+    const ascSymbol = "[!#$%&*+.\\/<=>?@\\\\^~-]";
+    const uniSymbol = "(\\p{S}|\\p{P})";
+    const special = "[(),;\\[\\]`|{}]";
+    const symbol = `(${ascSymbol}|(?!(${special}|[_:"']))${uniSymbol})`;
     const COMMENT = { variants: [
-      hljs.COMMENT("--", "$"),
+      hljs.COMMENT("--+", "$"),
       hljs.COMMENT(/\{-/, /-\}/, { contains: ["self"] })
     ] };
     const PRAGMA = {
@@ -17607,10 +17620,6 @@ var require_haskell = __commonJS((exports, module) => {
       end: /\}/,
       contains: LIST.contains
     };
-    const decimalDigits = "([0-9]_*)+";
-    const hexDigits = "([0-9a-fA-F]_*)+";
-    const binaryDigits = "([01]_*)+";
-    const octalDigits = "([0-7]_*)+";
     const NUMBER = {
       className: "number",
       relevance: 0,
@@ -17625,6 +17634,7 @@ var require_haskell = __commonJS((exports, module) => {
       name: "Haskell",
       aliases: ["hs"],
       keywords: "let in if then else case of where do module import hiding qualified type data newtype deriving class instance as default infix infixl infixr foreign export ccall stdcall cplusplus jvm dotnet safe unsafe family forall mdo proc rec",
+      unicodeRegex: true,
       contains: [
         {
           beginKeywords: "module",
@@ -17719,6 +17729,7 @@ var require_haskell = __commonJS((exports, module) => {
         NUMBER,
         CONSTRUCTOR,
         hljs.inherit(hljs.TITLE_MODE, { begin: "^[_a-z][\\w\']*" }),
+        { begin: `(?!-)${symbol}--+|--+(?!-)${symbol}` },
         COMMENT,
         {
           begin: "->|<-"
@@ -17732,12 +17743,14 @@ var require_haskell = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/haxe.js
 var require_haxe = __commonJS((exports, module) => {
   var haxe = function(hljs) {
+    const IDENT_RE = "[a-zA-Z_$][a-zA-Z0-9_$]*";
+    const HAXE_NUMBER_RE = /(-?)(\b0[xX][a-fA-F0-9_]+|(\b\d+(\.[\d_]*)?|\.[\d_]+)(([eE][-+]?\d+)|i32|u32|i64|f64)?)/;
     const HAXE_BASIC_TYPES = "Int Float String Bool Dynamic Void Array ";
     return {
       name: "Haxe",
       aliases: ["hx"],
       keywords: {
-        keyword: "break case cast catch continue default do dynamic else enum extern for function here if import in inline never new override package private get set public return static super switch this throw trace try typedef untyped using var while " + HAXE_BASIC_TYPES,
+        keyword: "abstract break case cast catch continue default do dynamic else enum extern final for function here if import in inline is macro never new override package private get set public return static super switch this throw trace try typedef untyped using var while " + HAXE_BASIC_TYPES,
         built_in: "trace this",
         literal: "true false null _"
       },
@@ -17750,12 +17763,12 @@ var require_haxe = __commonJS((exports, module) => {
             hljs.BACKSLASH_ESCAPE,
             {
               className: "subst",
-              begin: "\\$\\{",
-              end: "\\}"
+              begin: /\$\{/,
+              end: /\}/
             },
             {
               className: "subst",
-              begin: "\\$",
+              begin: /\$/,
               end: /\W\}/
             }
           ]
@@ -17763,11 +17776,20 @@ var require_haxe = __commonJS((exports, module) => {
         hljs.QUOTE_STRING_MODE,
         hljs.C_LINE_COMMENT_MODE,
         hljs.C_BLOCK_COMMENT_MODE,
-        hljs.C_NUMBER_MODE,
+        {
+          className: "number",
+          begin: HAXE_NUMBER_RE,
+          relevance: 0
+        },
+        {
+          className: "variable",
+          begin: "\\$" + IDENT_RE
+        },
         {
           className: "meta",
-          begin: "@:",
-          end: "$"
+          begin: /@:?/,
+          end: /\(|$/,
+          excludeEnd: true
         },
         {
           className: "meta",
@@ -17777,55 +17799,55 @@ var require_haxe = __commonJS((exports, module) => {
         },
         {
           className: "type",
-          begin: ":[ \t]*",
-          end: "[^A-Za-z0-9_ \t\\->]",
+          begin: /:[ \t]*/,
+          end: /[^A-Za-z0-9_ \t\->]/,
           excludeBegin: true,
           excludeEnd: true,
           relevance: 0
         },
         {
           className: "type",
-          begin: ":[ \t]*",
-          end: "\\W",
+          begin: /:[ \t]*/,
+          end: /\W/,
           excludeBegin: true,
           excludeEnd: true
         },
         {
           className: "type",
-          begin: "new *",
-          end: "\\W",
+          begin: /new */,
+          end: /\W/,
           excludeBegin: true,
           excludeEnd: true
         },
         {
-          className: "class",
+          className: "title.class",
           beginKeywords: "enum",
-          end: "\\{",
+          end: /\{/,
           contains: [hljs.TITLE_MODE]
         },
         {
-          className: "class",
-          beginKeywords: "abstract",
-          end: "[\\{$]",
+          className: "title.class",
+          begin: "\\babstract\\b(?=\\s*" + hljs.IDENT_RE + "\\s*\\()",
+          end: /[\{$]/,
           contains: [
             {
               className: "type",
-              begin: "\\(",
-              end: "\\)",
+              begin: /\(/,
+              end: /\)/,
               excludeBegin: true,
               excludeEnd: true
             },
             {
               className: "type",
-              begin: "from +",
-              end: "\\W",
+              begin: /from +/,
+              end: /\W/,
               excludeBegin: true,
               excludeEnd: true
             },
             {
               className: "type",
-              begin: "to +",
-              end: "\\W",
+              begin: /to +/,
+              end: /\W/,
               excludeBegin: true,
               excludeEnd: true
             },
@@ -17834,15 +17856,15 @@ var require_haxe = __commonJS((exports, module) => {
           keywords: { keyword: "abstract from to" }
         },
         {
-          className: "class",
-          begin: "\\b(class|interface) +",
-          end: "[\\{$]",
+          className: "title.class",
+          begin: /\b(class|interface) +/,
+          end: /[\{$]/,
           excludeEnd: true,
           keywords: "class interface",
           contains: [
             {
               className: "keyword",
-              begin: "\\b(extends|implements) +",
+              begin: /\b(extends|implements) +/,
               keywords: "extends implements",
               contains: [
                 {
@@ -17856,11 +17878,11 @@ var require_haxe = __commonJS((exports, module) => {
           ]
         },
         {
-          className: "function",
+          className: "title.function",
           beginKeywords: "function",
-          end: "\\(",
+          end: /\(/,
           excludeEnd: true,
-          illegal: "\\S",
+          illegal: /\S/,
           contains: [hljs.TITLE_MODE]
         }
       ],
@@ -20559,42 +20581,85 @@ var require_ldif = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/leaf.js
 var require_leaf = __commonJS((exports, module) => {
   var leaf = function(hljs) {
+    const IDENT = /([A-Za-z_][A-Za-z_0-9]*)?/;
+    const LITERALS = [
+      "true",
+      "false",
+      "in"
+    ];
+    const PARAMS = {
+      scope: "params",
+      begin: /\(/,
+      end: /\)(?=\:?)/,
+      endsParent: true,
+      relevance: 7,
+      contains: [
+        {
+          scope: "string",
+          begin: '"',
+          end: '"'
+        },
+        {
+          scope: "keyword",
+          match: LITERALS.join("|")
+        },
+        {
+          scope: "variable",
+          match: /[A-Za-z_][A-Za-z_0-9]*/
+        },
+        {
+          scope: "operator",
+          match: /\+|\-|\*|\/|\%|\=\=|\=|\!|\>|\<|\&\&|\|\|/
+        }
+      ]
+    };
+    const INSIDE_DISPATCH = {
+      match: [
+        IDENT,
+        /(?=\()/
+      ],
+      scope: {
+        1: "keyword"
+      },
+      contains: [PARAMS]
+    };
+    PARAMS.contains.unshift(INSIDE_DISPATCH);
     return {
       name: "Leaf",
       contains: [
         {
-          className: "function",
-          begin: "#+[A-Za-z_0-9]*\\(",
-          end: / \{/,
-          returnBegin: true,
-          excludeEnd: true,
+          match: [
+            /#+/,
+            IDENT,
+            /(?=\()/
+          ],
+          scope: {
+            1: "punctuation",
+            2: "keyword"
+          },
+          starts: {
+            contains: [
+              {
+                match: /\:/,
+                scope: "punctuation"
+              }
+            ]
+          },
           contains: [
-            {
-              className: "keyword",
-              begin: "#+"
-            },
-            {
-              className: "title",
-              begin: "[A-Za-z_][A-Za-z_0-9]*"
-            },
-            {
-              className: "params",
-              begin: "\\(",
-              end: "\\)",
-              endsParent: true,
-              contains: [
-                {
-                  className: "string",
-                  begin: '"',
-                  end: '"'
-                },
-                {
-                  className: "variable",
-                  begin: "[A-Za-z_][A-Za-z_0-9]*"
-                }
-              ]
-            }
+            PARAMS
           ]
+        },
+        {
+          match: [
+            /#+/,
+            IDENT,
+            /:?/
+          ],
+          scope: {
+            1: "punctuation",
+            2: "keyword",
+            3: "punctuation"
+          }
         }
       ]
     };
@@ -20802,7 +20867,7 @@ var require_less = __commonJS((exports, module) => {
       },
       CSS_VARIABLE: {
         className: "attr",
-        begin: /--[A-Za-z][A-Za-z0-9_-]*/
+        begin: /--[A-Za-z_][A-Za-z0-9_-]*/
       }
     };
   };
@@ -31561,6 +31626,7 @@ var require_nsis = __commonJS((exports, module) => {
       "addincludedir",
       "addplugindir",
       "appendfile",
+      "assert",
       "cd",
       "define",
       "delfile",
@@ -35185,272 +35251,134 @@ var require_r = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/reasonml.js
 var require_reasonml = __commonJS((exports, module) => {
   var reasonml = function(hljs) {
-    function orReValues(ops) {
-      return ops.map(function(op) {
-        return op.split("").map(function(char) {
-          return "\\" + char;
-        }).join("");
-      }).join("|");
-    }
-    const RE_IDENT = "~?[a-z$_][0-9a-zA-Z$_]*";
-    const RE_MODULE_IDENT = "`?[A-Z$_][0-9a-zA-Z$_]*";
-    const RE_PARAM_TYPEPARAM = "\'?[a-z$_][0-9a-z$_]*";
-    const RE_PARAM_TYPE = "\\s*:\\s*[a-z$_][0-9a-z$_]*(\\(\\s*(" + RE_PARAM_TYPEPARAM + "\\s*(," + RE_PARAM_TYPEPARAM + "\\s*)*)?\\))?";
-    const RE_PARAM = RE_IDENT + "(" + RE_PARAM_TYPE + "){0,2}";
-    const RE_OPERATOR = "(" + orReValues([
-      "||",
-      "++",
-      "**",
-      "+.",
-      "*",
-      "/",
-      "*.",
-      "/.",
-      "..."
-    ]) + "|\\|>|&&|==|===)";
-    const RE_OPERATOR_SPACED = "\\s+" + RE_OPERATOR + "\\s+";
-    const KEYWORDS = {
-      keyword: "and as asr assert begin class constraint do done downto else end exception external for fun function functor if in include inherit initializer land lazy let lor lsl lsr lxor match method mod module mutable new nonrec object of open or private rec sig struct then to try type val virtual when while with",
-      built_in: "array bool bytes char exn|5 float int int32 int64 list lazy_t|5 nativeint|5 ref string unit ",
-      literal: "true false"
-    };
-    const RE_NUMBER = "\\b(0[xX][a-fA-F0-9_]+[Lln]?|0[oO][0-7_]+[Lln]?|0[bB][01_]+[Lln]?|[0-9][0-9_]*([Lln]|(\\.[0-9_]*)?([eE][-+]?[0-9_]+)?)?)";
-    const NUMBER_MODE = {
-      className: "number",
-      relevance: 0,
-      variants: [
-        { begin: RE_NUMBER },
-        { begin: "\\(-" + RE_NUMBER + "\\)" }
-      ]
-    };
-    const OPERATOR_MODE = {
-      className: "operator",
-      relevance: 0,
-      begin: RE_OPERATOR
-    };
-    const LIST_CONTENTS_MODES = [
-      {
-        className: "identifier",
-        relevance: 0,
-        begin: RE_IDENT
-      },
-      OPERATOR_MODE,
-      NUMBER_MODE
+    const BUILT_IN_TYPES = [
+      "array",
+      "bool",
+      "bytes",
+      "char",
+      "exn|5",
+      "float",
+      "int",
+      "int32",
+      "int64",
+      "list",
+      "lazy_t|5",
+      "nativeint|5",
+      "ref",
+      "string",
+      "unit"
     ];
-    const MODULE_ACCESS_CONTENTS = [
-      hljs.QUOTE_STRING_MODE,
-      OPERATOR_MODE,
-      {
-        className: "module",
-        begin: "\\b" + RE_MODULE_IDENT,
-        returnBegin: true,
-        relevance: 0,
-        end: ".",
-        contains: [
-          {
-            className: "identifier",
-            begin: RE_MODULE_IDENT,
-            relevance: 0
-          }
-        ]
-      }
-    ];
-    const PARAMS_CONTENTS = [
-      {
-        className: "module",
-        begin: "\\b" + RE_MODULE_IDENT,
-        returnBegin: true,
-        end: ".",
-        relevance: 0,
-        contains: [
-          {
-            className: "identifier",
-            begin: RE_MODULE_IDENT,
-            relevance: 0
-          }
-        ]
-      }
-    ];
-    const PARAMS_MODE = {
-      begin: RE_IDENT,
-      end: "(,|\\n|\\))",
-      relevance: 0,
-      contains: [
-        OPERATOR_MODE,
-        {
-          className: "typing",
-          begin: ":",
-          end: "(,|\\n)",
-          returnBegin: true,
-          relevance: 0,
-          contains: PARAMS_CONTENTS
-        }
-      ]
-    };
-    const FUNCTION_BLOCK_MODE = {
-      className: "function",
-      relevance: 0,
-      keywords: KEYWORDS,
-      variants: [
-        {
-          begin: "\\s(\\(\\.?.*?\\)|" + RE_IDENT + ")\\s*=>",
-          end: "\\s*=>",
-          returnBegin: true,
-          relevance: 0,
-          contains: [
-            {
-              className: "params",
-              variants: [
-                { begin: RE_IDENT },
-                { begin: RE_PARAM },
-                { begin: /\(\s*\)/ }
-              ]
-            }
-          ]
-        },
-        {
-          begin: "\\s\\(\\.?[^;\\|]*\\)\\s*=>",
-          end: "\\s=>",
-          returnBegin: true,
-          relevance: 0,
-          contains: [
-            {
-              className: "params",
-              relevance: 0,
-              variants: [PARAMS_MODE]
-            }
-          ]
-        },
-        { begin: "\\(\\.\\s" + RE_IDENT + "\\)\\s*=>" }
-      ]
-    };
-    MODULE_ACCESS_CONTENTS.push(FUNCTION_BLOCK_MODE);
-    const CONSTRUCTOR_MODE = {
-      className: "constructor",
-      begin: RE_MODULE_IDENT + "\\(",
-      end: "\\)",
-      illegal: "\\n",
-      keywords: KEYWORDS,
-      contains: [
-        hljs.QUOTE_STRING_MODE,
-        OPERATOR_MODE,
-        {
-          className: "params",
-          begin: "\\b" + RE_IDENT
-        }
-      ]
-    };
-    const PATTERN_MATCH_BLOCK_MODE = {
-      className: "pattern-match",
-      begin: "\\|",
-      returnBegin: true,
-      keywords: KEYWORDS,
-      end: "=>",
-      relevance: 0,
-      contains: [
-        CONSTRUCTOR_MODE,
-        OPERATOR_MODE,
-        {
-          relevance: 0,
-          className: "constructor",
-          begin: RE_MODULE_IDENT
-        }
-      ]
-    };
-    const MODULE_ACCESS_MODE = {
-      className: "module-access",
-      keywords: KEYWORDS,
-      returnBegin: true,
-      variants: [
-        { begin: "\\b(" + RE_MODULE_IDENT + "\\.)+" + RE_IDENT },
-        {
-          begin: "\\b(" + RE_MODULE_IDENT + "\\.)+\\(",
-          end: "\\)",
-          returnBegin: true,
-          contains: [
-            FUNCTION_BLOCK_MODE,
-            {
-              begin: "\\(",
-              end: "\\)",
-              relevance: 0,
-              skip: true
-            }
-          ].concat(MODULE_ACCESS_CONTENTS)
-        },
-        {
-          begin: "\\b(" + RE_MODULE_IDENT + "\\.)+\\{",
-          end: /\}/
-        }
-      ],
-      contains: MODULE_ACCESS_CONTENTS
-    };
-    PARAMS_CONTENTS.push(MODULE_ACCESS_MODE);
     return {
       name: "ReasonML",
       aliases: ["re"],
-      keywords: KEYWORDS,
-      illegal: "(:-|:=|\\$\\{|\\+=)",
+      keywords: {
+        $pattern: /[a-z_]\w*!?/,
+        keyword: [
+          "and",
+          "as",
+          "asr",
+          "assert",
+          "begin",
+          "class",
+          "constraint",
+          "do",
+          "done",
+          "downto",
+          "else",
+          "end",
+          "esfun",
+          "exception",
+          "external",
+          "for",
+          "fun",
+          "function",
+          "functor",
+          "if",
+          "in",
+          "include",
+          "inherit",
+          "initializer",
+          "land",
+          "lazy",
+          "let",
+          "lor",
+          "lsl",
+          "lsr",
+          "lxor",
+          "mod",
+          "module",
+          "mutable",
+          "new",
+          "nonrec",
+          "object",
+          "of",
+          "open",
+          "or",
+          "pri",
+          "pub",
+          "rec",
+          "sig",
+          "struct",
+          "switch",
+          "then",
+          "to",
+          "try",
+          "type",
+          "val",
+          "virtual",
+          "when",
+          "while",
+          "with"
+        ],
+        built_in: BUILT_IN_TYPES,
+        literal: ["true", "false"]
+      },
+      illegal: /(:-|:=|\$\{|\+=)/,
       contains: [
-        hljs.COMMENT("/\\*", "\\*/", { illegal: "^(#,\\/\\/)" }),
         {
-          className: "character",
-          begin: "\'(\\\\[^\']+|[^\'])\'",
-          illegal: "\\n",
+          scope: "literal",
+          match: /\[(\|\|)?\]|\(\)/,
           relevance: 0
         },
-        hljs.QUOTE_STRING_MODE,
-        {
-          className: "literal",
-          begin: "\\(\\)",
-          relevance: 0
-        },
-        {
-          className: "literal",
-          begin: "\\[\\|",
-          end: "\\|\\]",
-          relevance: 0,
-          contains: LIST_CONTENTS_MODES
-        },
-        {
-          className: "literal",
-          begin: "\\[",
-          end: "\\]",
-          relevance: 0,
-          contains: LIST_CONTENTS_MODES
-        },
-        CONSTRUCTOR_MODE,
-        {
-          className: "operator",
-          begin: RE_OPERATOR_SPACED,
-          illegal: "-->",
-          relevance: 0
-        },
-        NUMBER_MODE,
         hljs.C_LINE_COMMENT_MODE,
-        PATTERN_MATCH_BLOCK_MODE,
-        FUNCTION_BLOCK_MODE,
+        hljs.COMMENT(/\/\*/, /\*\//, { illegal: /^(#,\/\/)/ }),
         {
-          className: "module-def",
-          begin: "\\bmodule\\s+" + RE_IDENT + "\\s+" + RE_MODULE_IDENT + "\\s+=\\s+\\{",
-          end: /\}/,
-          returnBegin: true,
-          keywords: KEYWORDS,
-          relevance: 0,
-          contains: [
-            {
-              className: "module",
-              relevance: 0,
-              begin: RE_MODULE_IDENT
-            },
-            {
-              begin: /\{/,
-              end: /\}/,
-              relevance: 0,
-              skip: true
-            }
-          ].concat(MODULE_ACCESS_CONTENTS)
+          scope: "symbol",
+          match: /\'[A-Za-z_](?!\')[\w\']*/
         },
-        MODULE_ACCESS_MODE
+        {
+          scope: "type",
+          match: /`[A-Z][\w\']*/
+        },
+        {
+          scope: "type",
+          match: /\b[A-Z][\w\']*/,
+          relevance: 0
+        },
+        {
+          match: /[a-z_]\w*\'[\w\']*/,
+          relevance: 0
+        },
+        {
+          scope: "operator",
+          match: /\s+(\|\||\+[\+\.]?|\*[\*\/\.]?|\/[\.]?|\.\.\.|\|>|&&|===?)\s+/,
+          relevance: 0
+        },
+        hljs.inherit(hljs.APOS_STRING_MODE, {
+          scope: "string",
+          relevance: 0
+        }),
+        hljs.inherit(hljs.QUOTE_STRING_MODE, { illegal: null }),
+        {
+          scope: "number",
+          variants: [
+            { match: /\b0[xX][a-fA-F0-9_]+[Lln]?/ },
+            { match: /\b0[oO][0-7_]+[Lln]?/ },
+            { match: /\b0[bB][01_]+[Lln]?/ },
+            { match: /\b[0-9][0-9_]*([Lln]|(\.[0-9_]*)?([eE][-+]?[0-9_]+)?)/ }
+          ],
+          relevance: 0
+        }
       ]
     };
   };
@@ -35845,7 +35773,7 @@ var require_rust = __commonJS((exports, module) => {
     const FUNCTION_INVOKE = {
       className: "title.function.invoke",
       relevance: 0,
-      begin: regex.concat(/\b/, /(?!let\b)/, hljs.IDENT_RE, regex.lookahead(/\s*\(/))
+      begin: regex.concat(/\b/, /(?!let|for|while|if|else|match\b)/, hljs.IDENT_RE, regex.lookahead(/\s*\(/))
     };
     const NUMBER_SUFFIX = "([ui](8|16|32|64|128|size)|f(32|64))?";
     const KEYWORDS = [
@@ -35949,6 +35877,7 @@ var require_rust = __commonJS((exports, module) => {
       "debug_assert!",
       "debug_assert_eq!",
       "env!",
+      "eprintln!",
       "panic!",
       "file!",
       "format!",
@@ -36743,7 +36672,11 @@ var require_scala = __commonJS((exports, module) => {
           excludeBegin: true,
           excludeEnd: true,
           relevance: 0,
-          contains: [TYPE]
+          contains: [
+            TYPE,
+            hljs.C_LINE_COMMENT_MODE,
+            hljs.C_BLOCK_COMMENT_MODE
+          ]
         },
         {
           className: "params",
@@ -36752,7 +36685,11 @@ var require_scala = __commonJS((exports, module) => {
           excludeBegin: true,
           excludeEnd: true,
           relevance: 0,
-          contains: [TYPE]
+          contains: [
+            TYPE,
+            hljs.C_LINE_COMMENT_MODE,
+            hljs.C_BLOCK_COMMENT_MODE
+          ]
         },
         NAME
       ]
@@ -36798,6 +36735,28 @@ var require_scala = __commonJS((exports, module) => {
       ],
       beginScope: { 2: "keyword" }
     };
+    const DIRECTIVE_VALUE = {
+      className: "string",
+      begin: /\S+/
+    };
+    const USING_DIRECTIVE = {
+      begin: [
+        "//>",
+        /\s+/,
+        /using/,
+        /\s+/,
+        /\S+/
+      ],
+      beginScope: {
+        1: "comment",
+        3: "keyword",
+        5: "type"
+      },
+      end: /$/,
+      contains: [
+        DIRECTIVE_VALUE
+      ]
+    };
     return {
       name: "Scala",
       keywords: {
@@ -36805,6 +36764,7 @@ var require_scala = __commonJS((exports, module) => {
         keyword: "type yield lazy override def with val var sealed abstract private trait object if then forSome for while do throw finally protected extends import final return else break new catch super class case package default try this match continue throws implicit export enum given transparent"
       },
       contains: [
+        USING_DIRECTIVE,
         hljs.C_LINE_COMMENT_MODE,
         hljs.C_BLOCK_COMMENT_MODE,
         STRING,
@@ -37158,7 +37118,7 @@ var require_scss = __commonJS((exports, module) => {
       },
       CSS_VARIABLE: {
         className: "attr",
-        begin: /--[A-Za-z][A-Za-z0-9_-]*/
+        begin: /--[A-Za-z_][A-Za-z0-9_-]*/
       }
     };
   };
@@ -41239,16 +41199,20 @@ var require_stan = __commonJS((exports, module) => {
     ];
     const TYPES = [
       "array",
+      "tuple",
       "complex",
       "int",
       "real",
       "vector",
+      "complex_vector",
       "ordered",
       "positive_ordered",
       "simplex",
       "unit_vector",
       "row_vector",
+      "complex_row_vector",
       "matrix",
+      "complex_matrix",
       "cholesky_factor_corr|10",
       "cholesky_factor_cov|10",
       "corr_matrix|10",
@@ -41256,8 +41220,6 @@ var require_stan = __commonJS((exports, module) => {
       "void"
     ];
     const FUNCTIONS = [
-      "Phi",
-      "Phi_approx",
       "abs",
       "acos",
       "acosh",
@@ -41275,7 +41237,6 @@ var require_stan = __commonJS((exports, module) => {
       "bessel_first_kind",
       "bessel_second_kind",
       "binary_log_loss",
-      "binomial_coefficient_log",
       "block",
       "cbrt",
       "ceil",
@@ -41286,37 +41247,48 @@ var require_stan = __commonJS((exports, module) => {
       "cols",
       "columns_dot_product",
       "columns_dot_self",
+      "complex_schur_decompose",
+      "complex_schur_decompose_t",
+      "complex_schur_decompose_u",
       "conj",
       "cos",
       "cosh",
       "cov_exp_quad",
       "crossprod",
+      "csr_extract",
       "csr_extract_u",
       "csr_extract_v",
       "csr_extract_w",
       "csr_matrix_times_vector",
       "csr_to_dense_matrix",
       "cumulative_sum",
+      "dae",
+      "dae_tol",
       "determinant",
       "diag_matrix",
+      "diagonal",
       "diag_post_multiply",
       "diag_pre_multiply",
-      "diagonal",
       "digamma",
       "dims",
       "distance",
       "dot_product",
       "dot_self",
+      "eigendecompose",
+      "eigendecompose_sym",
+      "eigenvalues",
       "eigenvalues_sym",
+      "eigenvectors",
       "eigenvectors_sym",
       "erf",
       "erfc",
       "exp",
       "exp2",
       "expm1",
-      "fabs",
       "falling_factorial",
       "fdim",
+      "fft",
+      "fft2",
       "floor",
       "fma",
       "fmax",
@@ -41326,7 +41298,6 @@ var require_stan = __commonJS((exports, module) => {
       "gamma_q",
       "generalized_inverse",
       "get_imag",
-      "get_lp",
       "get_real",
       "head",
       "hmm_hidden_state_prob",
@@ -41334,20 +41305,24 @@ var require_stan = __commonJS((exports, module) => {
       "hypot",
       "identity_matrix",
       "inc_beta",
-      "int_step",
       "integrate_1d",
       "integrate_ode",
       "integrate_ode_adams",
       "integrate_ode_bdf",
       "integrate_ode_rk45",
+      "int_step",
       "inv",
-      "inv_Phi",
       "inv_cloglog",
-      "inv_logit",
-      "inv_sqrt",
-      "inv_square",
+      "inv_erfc",
       "inverse",
       "inverse_spd",
+      "inv_fft",
+      "inv_fft2",
+      "inv_inc_beta",
+      "inv_logit",
+      "inv_Phi",
+      "inv_sqrt",
+      "inv_square",
       "is_inf",
       "is_nan",
       "lambert_w0",
@@ -41373,12 +41348,12 @@ var require_stan = __commonJS((exports, module) => {
       "log_falling_factorial",
       "log_inv_logit",
       "log_inv_logit_diff",
+      "logit",
       "log_mix",
       "log_modified_bessel_first_kind",
       "log_rising_factorial",
       "log_softmax",
       "log_sum_exp",
-      "logit",
       "machine_precision",
       "map_rect",
       "matrix_exp",
@@ -41393,10 +41368,11 @@ var require_stan = __commonJS((exports, module) => {
       "min",
       "modified_bessel_first_kind",
       "modified_bessel_second_kind",
-      "multiply_log",
       "multiply_lower_tri_self_transpose",
       "negative_infinity",
       "norm",
+      "norm1",
+      "norm2",
       "not_a_number",
       "num_elements",
       "ode_adams",
@@ -41417,14 +41393,18 @@ var require_stan = __commonJS((exports, module) => {
       "ones_row_vector",
       "ones_vector",
       "owens_t",
+      "Phi",
+      "Phi_approx",
       "polar",
       "positive_infinity",
       "pow",
       "print",
       "prod",
       "proj",
+      "qr",
       "qr_Q",
       "qr_R",
+      "qr_thin",
       "qr_thin_Q",
       "qr_thin_R",
       "quad_form",
@@ -41464,6 +41444,7 @@ var require_stan = __commonJS((exports, module) => {
       "sub_col",
       "sub_row",
       "sum",
+      "svd",
       "svd_U",
       "svd_V",
       "symmetrize_from_lower_tri",
@@ -41476,6 +41457,7 @@ var require_stan = __commonJS((exports, module) => {
       "to_array_1d",
       "to_array_2d",
       "to_complex",
+      "to_int",
       "to_matrix",
       "to_row_vector",
       "to_vector",
@@ -41518,18 +41500,22 @@ var require_stan = __commonJS((exports, module) => {
       "inv_chi_square",
       "inv_gamma",
       "inv_wishart",
+      "inv_wishart_cholesky",
       "lkj_corr",
       "lkj_corr_cholesky",
       "logistic",
+      "loglogistic",
       "lognormal",
       "multi_gp",
       "multi_gp_cholesky",
+      "multinomial",
+      "multinomial_logit",
       "multi_normal",
       "multi_normal_cholesky",
       "multi_normal_prec",
+      "multi_student_cholesky_t",
       "multi_student_t",
-      "multinomial",
-      "multinomial_logit",
+      "multi_student_t_cholesky",
       "neg_binomial",
       "neg_binomial_2",
       "neg_binomial_2_log",
@@ -41549,12 +41535,14 @@ var require_stan = __commonJS((exports, module) => {
       "skew_double_exponential",
       "skew_normal",
       "std_normal",
+      "std_normal_log",
       "student_t",
       "uniform",
       "von_mises",
       "weibull",
       "wiener",
-      "wishart"
+      "wishart",
+      "wishart_cholesky"
     ];
     const BLOCK_COMMENT = hljs.COMMENT(/\/\*/, /\*\//, {
       relevance: 0,
@@ -41937,7 +41925,7 @@ var require_stylus = __commonJS((exports, module) => {
       },
       CSS_VARIABLE: {
         className: "attr",
-        begin: /--[A-Za-z][A-Za-z0-9_-]*/
+        begin: /--[A-Za-z_][A-Za-z0-9_-]*/
       }
     };
   };
@@ -42688,6 +42676,45 @@ var require_swift = __commonJS((exports, module) => {
         SINGLE_LINE_STRING("###")
       ]
     };
+    const REGEXP_CONTENTS = [
+      hljs.BACKSLASH_ESCAPE,
+      {
+        begin: /\[/,
+        end: /\]/,
+        relevance: 0,
+        contains: [hljs.BACKSLASH_ESCAPE]
+      }
+    ];
+    const BARE_REGEXP_LITERAL = {
+      begin: /\/[^\s](?=[^/\n]*\/)/,
+      end: /\//,
+      contains: REGEXP_CONTENTS
+    };
+    const EXTENDED_REGEXP_LITERAL = (rawDelimiter) => {
+      const begin = concat(rawDelimiter, /\//);
+      const end = concat(/\//, rawDelimiter);
+      return {
+        begin,
+        end,
+        contains: [
+          ...REGEXP_CONTENTS,
+          {
+            scope: "comment",
+            begin: `#(?!.*${end})`,
+            end: /$/
+          }
+        ]
+      };
+    };
+    const REGEXP = {
+      scope: "regexp",
+      variants: [
+        EXTENDED_REGEXP_LITERAL("###"),
+        EXTENDED_REGEXP_LITERAL("##"),
+        EXTENDED_REGEXP_LITERAL("#"),
+        BARE_REGEXP_LITERAL
+      ]
+    };
     const QUOTED_IDENTIFIER = { match: concat(/`/, identifier, /`/) };
     const IMPLICIT_PARAMETER = {
       className: "variable",
@@ -42704,7 +42731,7 @@ var require_swift = __commonJS((exports, module) => {
     ];
     const AVAILABLE_ATTRIBUTE = {
       match: /(@|#(un)?)available/,
-      className: "keyword",
+      scope: "keyword",
       starts: { contains: [
         {
           begin: /\(/,
@@ -42719,11 +42746,11 @@ var require_swift = __commonJS((exports, module) => {
       ] }
     };
     const KEYWORD_ATTRIBUTE = {
-      className: "keyword",
+      scope: "keyword",
       match: concat(/@/, either(...keywordAttributes))
     };
     const USER_DEFINED_ATTRIBUTE = {
-      className: "meta",
+      scope: "meta",
       match: concat(/@/, identifier)
     };
     const ATTRIBUTES = [
@@ -42785,6 +42812,7 @@ var require_swift = __commonJS((exports, module) => {
         "self",
         TUPLE_ELEMENT_NAME,
         ...COMMENTS,
+        REGEXP,
         ...KEYWORD_MODES,
         ...BUILT_INS,
         ...OPERATORS,
@@ -42798,6 +42826,7 @@ var require_swift = __commonJS((exports, module) => {
     const GENERIC_PARAMETERS = {
       begin: /</,
       end: />/,
+      keywords: "repeat each",
       contains: [
         ...COMMENTS,
         TYPE
@@ -42836,9 +42865,9 @@ var require_swift = __commonJS((exports, module) => {
       endsParent: true,
       illegal: /["']/
     };
-    const FUNCTION = {
+    const FUNCTION_OR_MACRO = {
       match: [
-        /func/,
+        /(func|macro)/,
         /\s+/,
         either(QUOTED_IDENTIFIER.match, identifier, operator)
       ],
@@ -42925,7 +42954,7 @@ var require_swift = __commonJS((exports, module) => {
       keywords: KEYWORDS,
       contains: [
         ...COMMENTS,
-        FUNCTION,
+        FUNCTION_OR_MACRO,
         INIT_SUBSCRIPT,
         {
           beginKeywords: "struct protocol class extension enum actor",
@@ -42948,6 +42977,7 @@ var require_swift = __commonJS((exports, module) => {
           contains: [...COMMENTS],
           relevance: 0
         },
+        REGEXP,
         ...KEYWORD_MODES,
         ...BUILT_INS,
         ...OPERATORS,
@@ -42982,12 +43012,16 @@ var require_swift = __commonJS((exports, module) => {
     /as\?/,
     /as!/,
     "as",
+    "borrowing",
     "break",
     "case",
     "catch",
     "class",
+    "consume",
+    "consuming",
     "continue",
     "convenience",
+    "copy",
     "default",
     "defer",
     "deinit",
@@ -42995,6 +43029,7 @@ var require_swift = __commonJS((exports, module) => {
     "distributed",
     "do",
     "dynamic",
+    "each",
     "else",
     "enum",
     "extension",
@@ -43021,6 +43056,7 @@ var require_swift = __commonJS((exports, module) => {
     "nonisolated",
     "lazy",
     "let",
+    "macro",
     "mutating",
     "nonmutating",
     /open\(set\)/,
@@ -43095,7 +43131,6 @@ var require_swift = __commonJS((exports, module) => {
     "#line",
     "#selector",
     "#sourceLocation",
-    "#warn_unqualified_access",
     "#warning"
   ];
   var builtIns = [
@@ -43142,12 +43177,14 @@ var require_swift = __commonJS((exports, module) => {
   var identifier = concat(identifierHead, identifierCharacter, "*");
   var typeIdentifier = concat(/[A-Z]/, identifierCharacter, "*");
   var keywordAttributes = [
+    "attached",
     "autoclosure",
     concat(/convention\(/, either("swift", "block", "c"), /\)/),
     "discardableResult",
     "dynamicCallable",
     "dynamicMemberLookup",
     "escaping",
+    "freestanding",
     "frozen",
     "GKInspectable",
     "IBAction",
@@ -43167,10 +43204,13 @@ var require_swift = __commonJS((exports, module) => {
     "propertyWrapper",
     "requires_stored_property_inits",
     "resultBuilder",
+    "Sendable",
     "testable",
     "UIApplicationMain",
+    "unchecked",
     "unknown",
-    "usableFromInline"
+    "usableFromInline",
+    "warn_unqualified_access"
   ];
   var availabilityKeywords = [
     "iOS",
@@ -46926,7 +46966,8 @@ var require_xquery = __commonJS((exports, module) => {
       name: "XQuery",
       aliases: [
         "xpath",
-        "xq"
+        "xq",
+        "xqm"
       ],
       case_insensitive: false,
       illegal: /(proc)|(abstract)|(extends)|(until)|(#)/,
@@ -47396,8 +47437,8 @@ var require_help = __commonJS((exports) => {
       if (!this.showGlobalOptions)
         return [];
       const globalOptions = [];
-      for (let parentCmd = cmd.parent;parentCmd; parentCmd = parentCmd.parent) {
-        const visibleOptions = parentCmd.options.filter((option) => !option.hidden);
+      for (let ancestorCmd = cmd.parent;ancestorCmd; ancestorCmd = ancestorCmd.parent) {
+        const visibleOptions = ancestorCmd.options.filter((option) => !option.hidden);
         globalOptions.push(...visibleOptions);
       }
       if (this.sortOptions) {
@@ -47407,17 +47448,17 @@ var require_help = __commonJS((exports) => {
     }
     visibleArguments(cmd) {
       if (cmd._argsDescription) {
-        cmd._args.forEach((argument) => {
+        cmd.registeredArguments.forEach((argument) => {
           argument.description = argument.description || cmd._argsDescription[argument.name()] || "";
         });
       }
-      if (cmd._args.find((argument) => argument.description)) {
-        return cmd._args;
+      if (cmd.registeredArguments.find((argument) => argument.description)) {
+        return cmd.registeredArguments;
       }
       return [];
     }
     subcommandTerm(cmd) {
-      const args = cmd._args.map((arg) => humanReadableArgName(arg)).join(" ");
+      const args = cmd.registeredArguments.map((arg) => humanReadableArgName(arg)).join(" ");
       return cmd._name + (cmd._aliases[0] ? "|" + cmd._aliases[0] : "") + (cmd.options.length ? " [options]" : "") + (args ? " " + args : "");
     }
     optionTerm(option) {
@@ -47451,11 +47492,11 @@ var require_help = __commonJS((exports) => {
       if (cmd._aliases[0]) {
         cmdName = cmdName + "|" + cmd._aliases[0];
       }
-      let parentCmdNames = "";
-      for (let parentCmd = cmd.parent;parentCmd; parentCmd = parentCmd.parent) {
-        parentCmdNames = parentCmd.name() + " " + parentCmdNames;
+      let ancestorCmdNames = "";
+      for (let ancestorCmd = cmd.parent;ancestorCmd; ancestorCmd = ancestorCmd.parent) {
+        ancestorCmdNames = ancestorCmd.name() + " " + ancestorCmdNames;
       }
-      return parentCmdNames + cmdName + " " + cmd.usage();
+      return ancestorCmdNames + cmdName + " " + cmd.usage();
     }
     commandDescription(cmd) {
       return cmd.description();
@@ -47839,13 +47880,6 @@ var require_command = __commonJS((exports) => {
       return arg;
     });
   };
-  var getCommandAndParents = function(startCommand) {
-    const result = [];
-    for (let command = startCommand;command; command = command.parent) {
-      result.push(command);
-    }
-    return result;
-  };
   var EventEmitter = import.meta.require("events").EventEmitter;
   var childProcess = import.meta.require("child_process");
   var path = import.meta.require("path");
@@ -47865,7 +47899,8 @@ var require_command = __commonJS((exports) => {
       this.parent = null;
       this._allowUnknownOption = false;
       this._allowExcessArguments = true;
-      this._args = [];
+      this.registeredArguments = [];
+      this._args = this.registeredArguments;
       this.args = [];
       this.rawArgs = [];
       this.processedArgs = [];
@@ -47928,6 +47963,13 @@ var require_command = __commonJS((exports) => {
       this._showHelpAfterError = sourceCommand._showHelpAfterError;
       this._showSuggestionAfterError = sourceCommand._showSuggestionAfterError;
       return this;
+    }
+    _getCommandAndAncestors() {
+      const result = [];
+      for (let command = this;command; command = command.parent) {
+        result.push(command);
+      }
+      return result;
     }
     command(nameAndArgs, actionOptsOrExecDesc, execOpts) {
       let desc = actionOptsOrExecDesc;
@@ -48018,14 +48060,14 @@ var require_command = __commonJS((exports) => {
       return this;
     }
     addArgument(argument) {
-      const previousArgument = this._args.slice(-1)[0];
+      const previousArgument = this.registeredArguments.slice(-1)[0];
       if (previousArgument && previousArgument.variadic) {
         throw new Error(`only the last argument can be variadic '${previousArgument.name()}'`);
       }
       if (argument.required && argument.defaultValue !== undefined && argument.parseArg === undefined) {
         throw new Error(`a default value for a required argument is never used: '${argument.name()}'`);
       }
-      this._args.push(argument);
+      this.registeredArguments.push(argument);
       return this;
     }
     addHelpCommand(enableOrNameAndArgs, description) {
@@ -48081,7 +48123,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
     }
     action(fn) {
       const listener = (args) => {
-        const expectedArgsCount = this._args.length;
+        const expectedArgsCount = this.registeredArguments.length;
         const actionArgs = args.slice(0, expectedArgsCount);
         if (this._storeOptionsAsProperties) {
           actionArgs[expectedArgsCount] = this;
@@ -48096,6 +48138,17 @@ Expecting one of '${allowedValues.join("', '")}'`);
     }
     createOption(flags, description) {
       return new Option(flags, description);
+    }
+    _callParseArg(target, value, previous, invalidArgumentMessage) {
+      try {
+        return target.parseArg(value, previous);
+      } catch (err) {
+        if (err.code === "commander.invalidArgument") {
+          const message = `${invalidArgumentMessage} ${err.message}`;
+          this.error(message, { exitCode: err.exitCode, code: err.code });
+        }
+        throw err;
+      }
     }
     addOption(option) {
       const oname = option.name();
@@ -48115,15 +48168,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
         }
         const oldValue = this.getOptionValue(name);
         if (val !== null && option.parseArg) {
-          try {
-            val = option.parseArg(val, oldValue);
-          } catch (err) {
-            if (err.code === "commander.invalidArgument") {
-              const message = `${invalidValueMessage} ${err.message}`;
-              this.error(message, { exitCode: err.exitCode, code: err.code });
-            }
-            throw err;
-          }
+          val = this._callParseArg(option, val, oldValue, invalidValueMessage);
         } else if (val !== null && option.variadic) {
           val = option._concatValue(val, oldValue);
         }
@@ -48170,11 +48215,11 @@ Expecting one of '${allowedValues.join("', '")}'`);
       }
       return this.addOption(option);
     }
-    option(flags, description, fn, defaultValue) {
-      return this._optionEx({}, flags, description, fn, defaultValue);
+    option(flags, description, parseArg, defaultValue) {
+      return this._optionEx({}, flags, description, parseArg, defaultValue);
     }
-    requiredOption(flags, description, fn, defaultValue) {
-      return this._optionEx({ mandatory: true }, flags, description, fn, defaultValue);
+    requiredOption(flags, description, parseArg, defaultValue) {
+      return this._optionEx({ mandatory: true }, flags, description, parseArg, defaultValue);
     }
     combineFlagAndOptionalValue(combine = true) {
       this._combineFlagAndOptionalValue = !!combine;
@@ -48200,10 +48245,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
       return this;
     }
     storeOptionsAsProperties(storeAsProperties = true) {
-      this._storeOptionsAsProperties = !!storeAsProperties;
       if (this.options.length) {
         throw new Error("call .storeOptionsAsProperties() before adding options");
       }
+      this._storeOptionsAsProperties = !!storeAsProperties;
       return this;
     }
     getOptionValue(key) {
@@ -48229,7 +48274,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
     }
     getOptionValueSourceWithGlobals(key) {
       let source;
-      getCommandAndParents(this).forEach((cmd) => {
+      this._getCommandAndAncestors().forEach((cmd) => {
         if (cmd.getOptionValueSource(key) !== undefined) {
           source = cmd.getOptionValueSource(key);
         }
@@ -48380,16 +48425,16 @@ Expecting one of '${allowedValues.join("', '")}'`);
       const subCommand = this._findCommand(commandName);
       if (!subCommand)
         this.help({ error: true });
-      let hookResult;
-      hookResult = this._chainOrCallSubCommandHook(hookResult, subCommand, "preSubcommand");
-      hookResult = this._chainOrCall(hookResult, () => {
+      let promiseChain;
+      promiseChain = this._chainOrCallSubCommandHook(promiseChain, subCommand, "preSubcommand");
+      promiseChain = this._chainOrCall(promiseChain, () => {
         if (subCommand._executableHandler) {
           this._executeSubCommand(subCommand, operands.concat(unknown));
         } else {
           return subCommand._parseCommand(operands, unknown);
         }
       });
-      return hookResult;
+      return promiseChain;
     }
     _dispatchHelpCommand(subcommandName) {
       if (!subcommandName) {
@@ -48399,18 +48444,20 @@ Expecting one of '${allowedValues.join("', '")}'`);
       if (subCommand && !subCommand._executableHandler) {
         subCommand.help();
       }
-      return this._dispatchSubcommand(subcommandName, [], [this._helpLongFlag]);
+      return this._dispatchSubcommand(subcommandName, [], [
+        this._helpLongFlag || this._helpShortFlag
+      ]);
     }
     _checkNumberOfArguments() {
-      this._args.forEach((arg, i) => {
+      this.registeredArguments.forEach((arg, i) => {
         if (arg.required && this.args[i] == null) {
           this.missingArgument(arg.name());
         }
       });
-      if (this._args.length > 0 && this._args[this._args.length - 1].variadic) {
+      if (this.registeredArguments.length > 0 && this.registeredArguments[this.registeredArguments.length - 1].variadic) {
         return;
       }
-      if (this.args.length > this._args.length) {
+      if (this.args.length > this.registeredArguments.length) {
         this._excessArguments(this.args);
       }
     }
@@ -48418,21 +48465,14 @@ Expecting one of '${allowedValues.join("', '")}'`);
       const myParseArg = (argument, value, previous) => {
         let parsedValue = value;
         if (value !== null && argument.parseArg) {
-          try {
-            parsedValue = argument.parseArg(value, previous);
-          } catch (err) {
-            if (err.code === "commander.invalidArgument") {
-              const message = `error: command-argument value '${value}' is invalid for argument '${argument.name()}'. ${err.message}`;
-              this.error(message, { exitCode: err.exitCode, code: err.code });
-            }
-            throw err;
-          }
+          const invalidValueMessage = `error: command-argument value '${value}' is invalid for argument '${argument.name()}'.`;
+          parsedValue = this._callParseArg(argument, value, previous, invalidValueMessage);
         }
         return parsedValue;
       };
       this._checkNumberOfArguments();
       const processedArgs = [];
-      this._args.forEach((declaredArg, index) => {
+      this.registeredArguments.forEach((declaredArg, index) => {
         let value = declaredArg.defaultValue;
         if (declaredArg.variadic) {
           if (index < this.args.length) {
@@ -48464,7 +48504,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
     _chainOrCallHooks(promise, event) {
       let result = promise;
       const hooks = [];
-      getCommandAndParents(this).reverse().filter((cmd) => cmd._lifeCycleHooks[event] !== undefined).forEach((hookedCommand) => {
+      this._getCommandAndAncestors().reverse().filter((cmd) => cmd._lifeCycleHooks[event] !== undefined).forEach((hookedCommand) => {
         hookedCommand._lifeCycleHooks[event].forEach((callback) => {
           hooks.push({ hookedCommand, callback });
         });
@@ -48522,16 +48562,16 @@ Expecting one of '${allowedValues.join("', '")}'`);
       if (this._actionHandler) {
         checkForUnknownOptions();
         this._processArguments();
-        let actionResult;
-        actionResult = this._chainOrCallHooks(actionResult, "preAction");
-        actionResult = this._chainOrCall(actionResult, () => this._actionHandler(this.processedArgs));
+        let promiseChain;
+        promiseChain = this._chainOrCallHooks(promiseChain, "preAction");
+        promiseChain = this._chainOrCall(promiseChain, () => this._actionHandler(this.processedArgs));
         if (this.parent) {
-          actionResult = this._chainOrCall(actionResult, () => {
+          promiseChain = this._chainOrCall(promiseChain, () => {
             this.parent.emit(commandEvent, operands, unknown);
           });
         }
-        actionResult = this._chainOrCallHooks(actionResult, "postAction");
-        return actionResult;
+        promiseChain = this._chainOrCallHooks(promiseChain, "postAction");
+        return promiseChain;
       }
       if (this.parent && this.parent.listenerCount(commandEvent)) {
         checkForUnknownOptions();
@@ -48566,13 +48606,13 @@ Expecting one of '${allowedValues.join("', '")}'`);
       return this.options.find((option) => option.is(arg));
     }
     _checkForMissingMandatoryOptions() {
-      for (let cmd = this;cmd; cmd = cmd.parent) {
+      this._getCommandAndAncestors().forEach((cmd) => {
         cmd.options.forEach((anOption) => {
           if (anOption.mandatory && cmd.getOptionValue(anOption.attributeName()) === undefined) {
             cmd.missingMandatoryOptionValue(anOption);
           }
         });
-      }
+      });
     }
     _checkForConflictingLocalOptions() {
       const definedNonDefaultOptions = this.options.filter((option) => {
@@ -48591,9 +48631,9 @@ Expecting one of '${allowedValues.join("', '")}'`);
       });
     }
     _checkForConflictingOptions() {
-      for (let cmd = this;cmd; cmd = cmd.parent) {
+      this._getCommandAndAncestors().forEach((cmd) => {
         cmd._checkForConflictingLocalOptions();
-      }
+      });
     }
     parseOptions(argv) {
       const operands = [];
@@ -48702,7 +48742,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
       return this._optionValues;
     }
     optsWithGlobals() {
-      return getCommandAndParents(this).reduce((combinedOptions, cmd) => Object.assign(combinedOptions, cmd.opts()), {});
+      return this._getCommandAndAncestors().reduce((combinedOptions, cmd) => Object.assign(combinedOptions, cmd.opts()), {});
     }
     error(message, errorOptions) {
       this._outputConfiguration.outputError(`${message}\n`, this._outputConfiguration.writeErr);
@@ -48797,7 +48837,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
     _excessArguments(receivedArgs) {
       if (this._allowExcessArguments)
         return;
-      const expected = this._args.length;
+      const expected = this.registeredArguments.length;
       const s = expected === 1 ? "" : "s";
       const forSubcommand = this.parent ? ` for '${this.name()}'` : "";
       const message = `error: too many arguments${forSubcommand}. Expected ${expected} argument${s} but got ${receivedArgs.length}.`;
@@ -48870,10 +48910,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
       if (str === undefined) {
         if (this._usage)
           return this._usage;
-        const args = this._args.map((arg) => {
+        const args = this.registeredArguments.map((arg) => {
           return humanReadableArgName(arg);
         });
-        return [].concat(this.options.length || this._hasHelpOption ? "[options]" : [], this.commands.length ? "[command]" : [], this._args.length ? args : []).join(" ");
+        return [].concat(this.options.length || this._hasHelpOption ? "[options]" : [], this.commands.length ? "[command]" : [], this.registeredArguments.length ? args : []).join(" ");
       }
       this._usage = str;
       return this;
@@ -48921,7 +48961,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
         contextOptions = undefined;
       }
       const context = this._getHelpContext(contextOptions);
-      getCommandAndParents(this).reverse().forEach((command) => command.emit("beforeAllHelp", context));
+      this._getCommandAndAncestors().reverse().forEach((command) => command.emit("beforeAllHelp", context));
       this.emit("beforeHelp", context);
       let helpInformation = this.helpInformation(context);
       if (deprecatedCallback) {
@@ -48931,9 +48971,11 @@ Expecting one of '${allowedValues.join("', '")}'`);
         }
       }
       context.write(helpInformation);
-      this.emit(this._helpLongFlag);
+      if (this._helpLongFlag) {
+        this.emit(this._helpLongFlag);
+      }
       this.emit("afterHelp", context);
-      getCommandAndParents(this).forEach((command) => command.emit("afterAllHelp", context));
+      this._getCommandAndAncestors().forEach((command) => command.emit("afterAllHelp", context));
     }
     helpOption(flags, description) {
       if (typeof flags === "boolean") {
@@ -48988,13 +49030,13 @@ var require_commander = __commonJS((exports, module) => {
   var { Option } = require_option();
   exports = module.exports = new Command;
   exports.program = exports;
-  exports.Argument = Argument;
   exports.Command = Command;
-  exports.CommanderError = CommanderError;
+  exports.Option = Option;
+  exports.Argument = Argument;
   exports.Help = Help;
+  exports.CommanderError = CommanderError;
   exports.InvalidArgumentError = InvalidArgumentError;
   exports.InvalidOptionArgumentError = InvalidArgumentError;
-  exports.Option = Option;
 });
 
 // package.json
@@ -49035,8 +49077,8 @@ var require_package = __commonJS((exports, module) => {
       typescript: "^5.0.0"
     },
     dependencies: {
-      commander: "^11.0.0",
-      "highlight.js": "^11.8.0"
+      commander: "^11.1.0",
+      "highlight.js": "^11.9.0"
     },
     engines: {
       node: "^16 || ^18 || ^20",
