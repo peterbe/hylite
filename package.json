@@ -1,6 +1,6 @@
 {
   "name": "hylite",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A command line tool for highlighting code",
   "author": "Peter @peterbe Bengtsson",
   "license": "MIT",
