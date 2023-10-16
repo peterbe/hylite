@@ -22,10 +22,12 @@ jobs:
          cat preview.html  | grep '<span class="hljs-attr">name:</span>'
       - name: generate CSS output
         run: |
-          bun run css > github.css
-          grep '.hljs{background:#f3f3f3;color:#444}' github.css
+          bun run css > default.css
+          grep '.hljs {' default.css
+          grep 'background: #F3F3F3;' default.css
           bun run css gradient-light > gradient-light.css
-          grep '.hljs{background-color:#f9ccff;background-image:linear-gradient' gradient-light.css
+          grep '.hljs {' gradient-light.css
+          grep 'background-color: #f9ccff;' gradient-light.css
           bun run list-css | grep xcode
       - name: start a preview server
         run: |
