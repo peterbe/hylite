@@ -48759,7 +48759,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
     }
     _parseOptionsEnv() {
       this.options.forEach((option) => {
-        if (option.envVar && (option.envVar in process2.env)) {
+        if (option.envVar && option.envVar in process2.env) {
           const optionKey = option.attributeName();
           if (this.getOptionValue(optionKey) === undefined || ["default", "config", "env"].includes(this.getOptionValueSource(optionKey))) {
             if (option.required || option.optional) {
@@ -49208,7 +49208,7 @@ var startServer = function(code, cssName = "", port = 3000) {
         try {
           css = await getCSS(loadedCssName);
         } catch (error) {
-          if (error instanceof Error && ("code" in error) && error.code === "ENOENT") {
+          if (error instanceof Error && "code" in error && error.code === "ENOENT") {
             return new Response("css file not found", { status: 400 });
           }
         }
