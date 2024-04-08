@@ -49070,7 +49070,7 @@ var require_package = __commonJS((exports, module) => {
       "bun-types": "latest",
       husky: "^8.0.3",
       np: "^9.2.0",
-      prettier: "^3.1.1"
+      prettier: "^3.2.5"
     },
     peerDependencies: {
       typescript: "^5.0.0"
