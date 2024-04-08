@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { createRequire as createImportMetaRequire } from "module"; import.meta.require ||= (id) => createImportMetaRequire(import.meta.url)(id);
 // @bun
+import {createRequire} from "node:module";
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getProtoOf = Object.getPrototypeOf;
@@ -18,9 +19,7 @@ var __toESM = (mod, isNodeMode, target) => {
   return to;
 };
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
-var __require = (id) => {
-  return import.meta.require(id);
-};
+var __require = createRequire(import.meta.url);
 
 // node_modules/highlight.js/lib/core.js
 var require_core = __commonJS((exports, module) => {
