@@ -26,16 +26,16 @@
   },
   "devDependencies": {
     "bun-types": "latest",
-    "husky": "^8.0.3",
-    "np": "^9.2.0",
-    "prettier": "^3.2.5"
+    "husky": "^9.1.6",
+    "np": "^10.0.7",
+    "prettier": "^3.3.3"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "commander": "^11.1.0",
-    "highlight.js": "^11.9.0"
+    "commander": "^12.1.0",
+    "highlight.js": "^11.10.0"
   },
   "engines": {
     "node": "^16 || ^18 || ^20",
