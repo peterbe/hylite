@@ -26,19 +26,19 @@
   },
   "devDependencies": {
     "bun-types": "latest",
-    "husky": "^9.1.6",
-    "np": "^10.0.7",
-    "prettier": "^3.3.3"
+    "husky": "^9.1.7",
+    "np": "^10.2.0",
+    "prettier": "^3.5.3"
   },
   "peerDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^5.3.3"
   },
   "dependencies": {
     "commander": "^12.1.0",
-    "highlight.js": "^11.10.0"
+    "highlight.js": "^11.11.1"
   },
   "engines": {
-    "node": "^16 || ^18 || ^20",
+    "node": "^16 || ^18 || ^20 || ^21 || ^22",
     "bun": "^1"
   }
 }

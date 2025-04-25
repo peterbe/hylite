@@ -43,6 +43,18 @@ var require_core = __commonJS((exports, module) => {
     });
     return obj;
   }
+
+  class Response2 {
+    constructor(mode) {
+      if (mode.data === undefined)
+        mode.data = {};
+      this.data = mode.data;
+      this.isMatchIgnored = false;
+    }
+    ignoreMatch() {
+      this.isMatchIgnored = true;
+    }
+  }
   function escapeHTML(value) {
     return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
   }
@@ -57,6 +69,149 @@ var require_core = __commonJS((exports, module) => {
       }
     });
     return result;
+  }
+  var SPAN_CLOSE = "</span>";
+  var emitsWrappingTags = (node) => {
+    return !!node.scope;
+  };
+  var scopeToCSSClass = (name, { prefix }) => {
+    if (name.startsWith("language:")) {
+      return name.replace("language:", "language-");
+    }
+    if (name.includes(".")) {
+      const pieces = name.split(".");
+      return [
+        `${prefix}${pieces.shift()}`,
+        ...pieces.map((x, i) => `${x}${"_".repeat(i + 1)}`)
+      ].join(" ");
+    }
+    return `${prefix}${name}`;
+  };
+
+  class HTMLRenderer {
+    constructor(parseTree, options) {
+      this.buffer = "";
+      this.classPrefix = options.classPrefix;
+      parseTree.walk(this);
+    }
+    addText(text) {
+      this.buffer += escapeHTML(text);
+    }
+    openNode(node) {
+      if (!emitsWrappingTags(node))
+        return;
+      const className = scopeToCSSClass(node.scope, { prefix: this.classPrefix });
+      this.span(className);
+    }
+    closeNode(node) {
+      if (!emitsWrappingTags(node))
+        return;
+      this.buffer += SPAN_CLOSE;
+    }
+    value() {
+      return this.buffer;
+    }
+    span(className) {
+      this.buffer += `<span class="${className}">`;
+    }
+  }
+  var newNode = (opts = {}) => {
+    const result = { children: [] };
+    Object.assign(result, opts);
+    return result;
+  };
+
+  class TokenTree {
+    constructor() {
+      this.rootNode = newNode();
+      this.stack = [this.rootNode];
+    }
+    get top() {
+      return this.stack[this.stack.length - 1];
+    }
+    get root() {
+      return this.rootNode;
+    }
+    add(node) {
+      this.top.children.push(node);
+    }
+    openNode(scope) {
+      const node = newNode({ scope });
+      this.add(node);
+      this.stack.push(node);
+    }
+    closeNode() {
+      if (this.stack.length > 1) {
+        return this.stack.pop();
+      }
+      return;
+    }
+    closeAllNodes() {
+      while (this.closeNode())
+        ;
+    }
+    toJSON() {
+      return JSON.stringify(this.rootNode, null, 4);
+    }
+    walk(builder) {
+      return this.constructor._walk(builder, this.rootNode);
+    }
+    static _walk(builder, node) {
+      if (typeof node === "string") {
+        builder.addText(node);
+      } else if (node.children) {
+        builder.openNode(node);
+        node.children.forEach((child) => this._walk(builder, child));
+        builder.closeNode(node);
+      }
+      return builder;
+    }
+    static _collapse(node) {
+      if (typeof node === "string")
+        return;
+      if (!node.children)
+        return;
+      if (node.children.every((el) => typeof el === "string")) {
+        node.children = [node.children.join("")];
+      } else {
+        node.children.forEach((child) => {
+          TokenTree._collapse(child);
+        });
+      }
+    }
+  }
+
+  class TokenTreeEmitter extends TokenTree {
+    constructor(options) {
+      super();
+      this.options = options;
+    }
+    addText(text) {
+      if (text === "") {
+        return;
+      }
+      this.add(text);
+    }
+    startScope(scope) {
+      this.openNode(scope);
+    }
+    endScope() {
+      this.closeNode();
+    }
+    __addSublanguage(emitter, name) {
+      const node = emitter.root;
+      if (name)
+        node.scope = `language:${name}`;
+      this.add(node);
+    }
+    toHTML() {
+      const renderer = new HTMLRenderer(this, this.options);
+      return renderer.value();
+    }
+    finalize() {
+      this.closeAllNodes();
+      return true;
+    }
   }
   function source(re) {
     if (!re)
@@ -99,6 +254,7 @@ var require_core = __commonJS((exports, module) => {
     const match = re && re.exec(lexeme);
     return match && match.index === 0;
   }
+  var BACKREF_RE = /\[(?:[^\\\]]|\\.)*\]|\(\??|\\([1-9][0-9]*)|\\./;
   function _rewriteBackreferences(regexps, { joinWith }) {
     let numCaptures = 0;
     return regexps.map((regex) => {
@@ -126,6 +282,154 @@ var require_core = __commonJS((exports, module) => {
       return out;
     }).map((re) => `(${re})`).join(joinWith);
   }
+  var MATCH_NOTHING_RE = /\b\B/;
+  var IDENT_RE = "[a-zA-Z]\\w*";
+  var UNDERSCORE_IDENT_RE = "[a-zA-Z_]\\w*";
+  var NUMBER_RE = "\\b\\d+(\\.\\d+)?";
+  var C_NUMBER_RE = "(-?)(\\b0[xX][a-fA-F0-9]+|(\\b\\d+(\\.\\d*)?|\\.\\d+)([eE][-+]?\\d+)?)";
+  var BINARY_NUMBER_RE = "\\b(0b[01]+)";
+  var RE_STARTERS_RE = "!|!=|!==|%|%=|&|&&|&=|\\*|\\*=|\\+|\\+=|,|-|-=|/=|/|:|;|<<|<<=|<=|<|===|==|=|>>>=|>>=|>=|>>>|>>|>|\\?|\\[|\\{|\\(|\\^|\\^=|\\||\\|=|\\|\\||~";
+  var SHEBANG = (opts = {}) => {
+    const beginShebang = /^#![ ]*\//;
+    if (opts.binary) {
+      opts.begin = concat(beginShebang, /.*\b/, opts.binary, /\b.*/);
+    }
+    return inherit$1({
+      scope: "meta",
+      begin: beginShebang,
+      end: /$/,
+      relevance: 0,
+      "on:begin": (m, resp) => {
+        if (m.index !== 0)
+          resp.ignoreMatch();
+      }
+    }, opts);
+  };
+  var BACKSLASH_ESCAPE = {
+    begin: "\\\\[\\s\\S]",
+    relevance: 0
+  };
+  var APOS_STRING_MODE = {
+    scope: "string",
+    begin: "'",
+    end: "'",
+    illegal: "\\n",
+    contains: [BACKSLASH_ESCAPE]
+  };
+  var QUOTE_STRING_MODE = {
+    scope: "string",
+    begin: '"',
+    end: '"',
+    illegal: "\\n",
+    contains: [BACKSLASH_ESCAPE]
+  };
+  var PHRASAL_WORDS_MODE = {
+    begin: /\b(a|an|the|are|I'm|isn't|don't|doesn't|won't|but|just|should|pretty|simply|enough|gonna|going|wtf|so|such|will|you|your|they|like|more)\b/
+  };
+  var COMMENT = function(begin, end, modeOptions = {}) {
+    const mode = inherit$1({
+      scope: "comment",
+      begin,
+      end,
+      contains: []
+    }, modeOptions);
+    mode.contains.push({
+      scope: "doctag",
+      begin: "[ ]*(?=(TODO|FIXME|NOTE|BUG|OPTIMIZE|HACK|XXX):)",
+      end: /(TODO|FIXME|NOTE|BUG|OPTIMIZE|HACK|XXX):/,
+      excludeBegin: true,
+      relevance: 0
+    });
+    const ENGLISH_WORD = either("I", "a", "is", "so", "us", "to", "at", "if", "in", "it", "on", /[A-Za-z]+['](d|ve|re|ll|t|s|n)/, /[A-Za-z]+[-][a-z]+/, /[A-Za-z][a-z]{2,}/);
+    mode.contains.push({
+      begin: concat(/[ ]+/, "(", ENGLISH_WORD, /[.]?[:]?([.][ ]|[ ])/, "){3}")
+    });
+    return mode;
+  };
+  var C_LINE_COMMENT_MODE = COMMENT("//", "$");
+  var C_BLOCK_COMMENT_MODE = COMMENT("/\\*", "\\*/");
+  var HASH_COMMENT_MODE = COMMENT("#", "$");
+  var NUMBER_MODE = {
+    scope: "number",
+    begin: NUMBER_RE,
+    relevance: 0
+  };
+  var C_NUMBER_MODE = {
+    scope: "number",
+    begin: C_NUMBER_RE,
+    relevance: 0
+  };
+  var BINARY_NUMBER_MODE = {
+    scope: "number",
+    begin: BINARY_NUMBER_RE,
+    relevance: 0
+  };
+  var REGEXP_MODE = {
+    scope: "regexp",
+    begin: /\/(?=[^/\n]*\/)/,
+    end: /\/[gimuy]*/,
+    contains: [
+      BACKSLASH_ESCAPE,
+      {
+        begin: /\[/,
+        end: /\]/,
+        relevance: 0,
+        contains: [BACKSLASH_ESCAPE]
+      }
+    ]
+  };
+  var TITLE_MODE = {
+    scope: "title",
+    begin: IDENT_RE,
+    relevance: 0
+  };
+  var UNDERSCORE_TITLE_MODE = {
+    scope: "title",
+    begin: UNDERSCORE_IDENT_RE,
+    relevance: 0
+  };
+  var METHOD_GUARD = {
+    begin: "\\.\\s*" + UNDERSCORE_IDENT_RE,
+    relevance: 0
+  };
+  var END_SAME_AS_BEGIN = function(mode) {
+    return Object.assign(mode, {
+      "on:begin": (m, resp) => {
+        resp.data._beginMatch = m[1];
+      },
+      "on:end": (m, resp) => {
+        if (resp.data._beginMatch !== m[1])
+          resp.ignoreMatch();
+      }
+    });
+  };
+  var MODES = /* @__PURE__ */ Object.freeze({
+    __proto__: null,
+    APOS_STRING_MODE,
+    BACKSLASH_ESCAPE,
+    BINARY_NUMBER_MODE,
+    BINARY_NUMBER_RE,
+    COMMENT,
+    C_BLOCK_COMMENT_MODE,
+    C_LINE_COMMENT_MODE,
+    C_NUMBER_MODE,
+    C_NUMBER_RE,
+    END_SAME_AS_BEGIN,
+    HASH_COMMENT_MODE,
+    IDENT_RE,
+    MATCH_NOTHING_RE,
+    METHOD_GUARD,
+    NUMBER_MODE,
+    NUMBER_RE,
+    PHRASAL_WORDS_MODE,
+    QUOTE_STRING_MODE,
+    REGEXP_MODE,
+    RE_STARTERS_RE,
+    SHEBANG,
+    TITLE_MODE,
+    UNDERSCORE_IDENT_RE,
+    UNDERSCORE_TITLE_MODE
+  });
   function skipIfHasPrecedingDot(match, response) {
     const before = match.input[match.index - 1];
     if (before === ".") {
@@ -167,6 +471,40 @@ var require_core = __commonJS((exports, module) => {
     if (mode.relevance === undefined)
       mode.relevance = 1;
   }
+  var beforeMatchExt = (mode, parent) => {
+    if (!mode.beforeMatch)
+      return;
+    if (mode.starts)
+      throw new Error("beforeMatch cannot be used with starts");
+    const originalMode = Object.assign({}, mode);
+    Object.keys(mode).forEach((key) => {
+      delete mode[key];
+    });
+    mode.keywords = originalMode.keywords;
+    mode.begin = concat(originalMode.beforeMatch, lookahead(originalMode.begin));
+    mode.starts = {
+      relevance: 0,
+      contains: [
+        Object.assign(originalMode, { endsParent: true })
+      ]
+    };
+    mode.relevance = 0;
+    delete originalMode.beforeMatch;
+  };
+  var COMMON_KEYWORDS = [
+    "of",
+    "and",
+    "for",
+    "in",
+    "not",
+    "or",
+    "if",
+    "then",
+    "parent",
+    "list",
+    "value"
+  ];
+  var DEFAULT_KEYWORD_SCOPE = "keyword";
   function compileKeywords(rawKeywords, caseInsensitive, scopeName = DEFAULT_KEYWORD_SCOPE) {
     const compiledKeywords = Object.create(null);
     if (typeof rawKeywords === "string") {
@@ -198,6 +536,20 @@ var require_core = __commonJS((exports, module) => {
   function commonKeyword(keyword) {
     return COMMON_KEYWORDS.includes(keyword.toLowerCase());
   }
+  var seenDeprecations = {};
+  var error = (message) => {
+    console.error(message);
+  };
+  var warn = (message, ...args) => {
+    console.log(`WARN: ${message}`, ...args);
+  };
+  var deprecated = (version2, message) => {
+    if (seenDeprecations[`${version2}/${message}`])
+      return;
+    console.log(`Deprecated as of ${version2}. ${message}`);
+    seenDeprecations[`${version2}/${message}`] = true;
+  };
+  var MultiClassError = new Error;
   function remapScopeNames(mode, regexes, { key }) {
     let offset = 0;
     const scopeNames = mode[key];
@@ -445,359 +797,7 @@ var require_core = __commonJS((exports, module) => {
     }
     return mode;
   }
-
-  class Response2 {
-    constructor(mode) {
-      if (mode.data === undefined)
-        mode.data = {};
-      this.data = mode.data;
-      this.isMatchIgnored = false;
-    }
-    ignoreMatch() {
-      this.isMatchIgnored = true;
-    }
-  }
-  var SPAN_CLOSE = "</span>";
-  var emitsWrappingTags = (node) => {
-    return !!node.scope;
-  };
-  var scopeToCSSClass = (name, { prefix }) => {
-    if (name.startsWith("language:")) {
-      return name.replace("language:", "language-");
-    }
-    if (name.includes(".")) {
-      const pieces = name.split(".");
-      return [
-        `${prefix}${pieces.shift()}`,
-        ...pieces.map((x, i) => `${x}${"_".repeat(i + 1)}`)
-      ].join(" ");
-    }
-    return `${prefix}${name}`;
-  };
-
-  class HTMLRenderer {
-    constructor(parseTree, options) {
-      this.buffer = "";
-      this.classPrefix = options.classPrefix;
-      parseTree.walk(this);
-    }
-    addText(text) {
-      this.buffer += escapeHTML(text);
-    }
-    openNode(node) {
-      if (!emitsWrappingTags(node))
-        return;
-      const className = scopeToCSSClass(node.scope, { prefix: this.classPrefix });
-      this.span(className);
-    }
-    closeNode(node) {
-      if (!emitsWrappingTags(node))
-        return;
-      this.buffer += SPAN_CLOSE;
-    }
-    value() {
-      return this.buffer;
-    }
-    span(className) {
-      this.buffer += `<span class="${className}">`;
-    }
-  }
-  var newNode = (opts = {}) => {
-    const result = { children: [] };
-    Object.assign(result, opts);
-    return result;
-  };
-
-  class TokenTree {
-    constructor() {
-      this.rootNode = newNode();
-      this.stack = [this.rootNode];
-    }
-    get top() {
-      return this.stack[this.stack.length - 1];
-    }
-    get root() {
-      return this.rootNode;
-    }
-    add(node) {
-      this.top.children.push(node);
-    }
-    openNode(scope) {
-      const node = newNode({ scope });
-      this.add(node);
-      this.stack.push(node);
-    }
-    closeNode() {
-      if (this.stack.length > 1) {
-        return this.stack.pop();
-      }
-      return;
-    }
-    closeAllNodes() {
-      while (this.closeNode())
-        ;
-    }
-    toJSON() {
-      return JSON.stringify(this.rootNode, null, 4);
-    }
-    walk(builder) {
-      return this.constructor._walk(builder, this.rootNode);
-    }
-    static _walk(builder, node) {
-      if (typeof node === "string") {
-        builder.addText(node);
-      } else if (node.children) {
-        builder.openNode(node);
-        node.children.forEach((child) => this._walk(builder, child));
-        builder.closeNode(node);
-      }
-      return builder;
-    }
-    static _collapse(node) {
-      if (typeof node === "string")
-        return;
-      if (!node.children)
-        return;
-      if (node.children.every((el) => typeof el === "string")) {
-        node.children = [node.children.join("")];
-      } else {
-        node.children.forEach((child) => {
-          TokenTree._collapse(child);
-        });
-      }
-    }
-  }
-
-  class TokenTreeEmitter extends TokenTree {
-    constructor(options) {
-      super();
-      this.options = options;
-    }
-    addText(text) {
-      if (text === "") {
-        return;
-      }
-      this.add(text);
-    }
-    startScope(scope) {
-      this.openNode(scope);
-    }
-    endScope() {
-      this.closeNode();
-    }
-    __addSublanguage(emitter, name) {
-      const node = emitter.root;
-      if (name)
-        node.scope = `language:${name}`;
-      this.add(node);
-    }
-    toHTML() {
-      const renderer = new HTMLRenderer(this, this.options);
-      return renderer.value();
-    }
-    finalize() {
-      this.closeAllNodes();
-      return true;
-    }
-  }
-  var BACKREF_RE = /\[(?:[^\\\]]|\\.)*\]|\(\??|\\([1-9][0-9]*)|\\./;
-  var MATCH_NOTHING_RE = /\b\B/;
-  var IDENT_RE = "[a-zA-Z]\\w*";
-  var UNDERSCORE_IDENT_RE = "[a-zA-Z_]\\w*";
-  var NUMBER_RE = "\\b\\d+(\\.\\d+)?";
-  var C_NUMBER_RE = "(-?)(\\b0[xX][a-fA-F0-9]+|(\\b\\d+(\\.\\d*)?|\\.\\d+)([eE][-+]?\\d+)?)";
-  var BINARY_NUMBER_RE = "\\b(0b[01]+)";
-  var RE_STARTERS_RE = "!|!=|!==|%|%=|&|&&|&=|\\*|\\*=|\\+|\\+=|,|-|-=|/=|/|:|;|<<|<<=|<=|<|===|==|=|>>>=|>>=|>=|>>>|>>|>|\\?|\\[|\\{|\\(|\\^|\\^=|\\||\\|=|\\|\\||~";
-  var SHEBANG = (opts = {}) => {
-    const beginShebang = /^#![ ]*\//;
-    if (opts.binary) {
-      opts.begin = concat(beginShebang, /.*\b/, opts.binary, /\b.*/);
-    }
-    return inherit$1({
-      scope: "meta",
-      begin: beginShebang,
-      end: /$/,
-      relevance: 0,
-      "on:begin": (m, resp) => {
-        if (m.index !== 0)
-          resp.ignoreMatch();
-      }
-    }, opts);
-  };
-  var BACKSLASH_ESCAPE = {
-    begin: "\\\\[\\s\\S]",
-    relevance: 0
-  };
-  var APOS_STRING_MODE = {
-    scope: "string",
-    begin: "\'",
-    end: "\'",
-    illegal: "\\n",
-    contains: [BACKSLASH_ESCAPE]
-  };
-  var QUOTE_STRING_MODE = {
-    scope: "string",
-    begin: '"',
-    end: '"',
-    illegal: "\\n",
-    contains: [BACKSLASH_ESCAPE]
-  };
-  var PHRASAL_WORDS_MODE = {
-    begin: /\b(a|an|the|are|I'm|isn't|don't|doesn't|won't|but|just|should|pretty|simply|enough|gonna|going|wtf|so|such|will|you|your|they|like|more)\b/
-  };
-  var COMMENT = function(begin, end, modeOptions = {}) {
-    const mode = inherit$1({
-      scope: "comment",
-      begin,
-      end,
-      contains: []
-    }, modeOptions);
-    mode.contains.push({
-      scope: "doctag",
-      begin: "[ ]*(?=(TODO|FIXME|NOTE|BUG|OPTIMIZE|HACK|XXX):)",
-      end: /(TODO|FIXME|NOTE|BUG|OPTIMIZE|HACK|XXX):/,
-      excludeBegin: true,
-      relevance: 0
-    });
-    const ENGLISH_WORD = either("I", "a", "is", "so", "us", "to", "at", "if", "in", "it", "on", /[A-Za-z]+['](d|ve|re|ll|t|s|n)/, /[A-Za-z]+[-][a-z]+/, /[A-Za-z][a-z]{2,}/);
-    mode.contains.push({
-      begin: concat(/[ ]+/, "(", ENGLISH_WORD, /[.]?[:]?([.][ ]|[ ])/, "){3}")
-    });
-    return mode;
-  };
-  var C_LINE_COMMENT_MODE = COMMENT("//", "$");
-  var C_BLOCK_COMMENT_MODE = COMMENT("/\\*", "\\*/");
-  var HASH_COMMENT_MODE = COMMENT("#", "$");
-  var NUMBER_MODE = {
-    scope: "number",
-    begin: NUMBER_RE,
-    relevance: 0
-  };
-  var C_NUMBER_MODE = {
-    scope: "number",
-    begin: C_NUMBER_RE,
-    relevance: 0
-  };
-  var BINARY_NUMBER_MODE = {
-    scope: "number",
-    begin: BINARY_NUMBER_RE,
-    relevance: 0
-  };
-  var REGEXP_MODE = {
-    scope: "regexp",
-    begin: /\/(?=[^/\n]*\/)/,
-    end: /\/[gimuy]*/,
-    contains: [
-      BACKSLASH_ESCAPE,
-      {
-        begin: /\[/,
-        end: /\]/,
-        relevance: 0,
-        contains: [BACKSLASH_ESCAPE]
-      }
-    ]
-  };
-  var TITLE_MODE = {
-    scope: "title",
-    begin: IDENT_RE,
-    relevance: 0
-  };
-  var UNDERSCORE_TITLE_MODE = {
-    scope: "title",
-    begin: UNDERSCORE_IDENT_RE,
-    relevance: 0
-  };
-  var METHOD_GUARD = {
-    begin: "\\.\\s*" + UNDERSCORE_IDENT_RE,
-    relevance: 0
-  };
-  var END_SAME_AS_BEGIN = function(mode) {
-    return Object.assign(mode, {
-      "on:begin": (m, resp) => {
-        resp.data._beginMatch = m[1];
-      },
-      "on:end": (m, resp) => {
-        if (resp.data._beginMatch !== m[1])
-          resp.ignoreMatch();
-      }
-    });
-  };
-  var MODES = /* @__PURE__ */ Object.freeze({
-    __proto__: null,
-    APOS_STRING_MODE,
-    BACKSLASH_ESCAPE,
-    BINARY_NUMBER_MODE,
-    BINARY_NUMBER_RE,
-    COMMENT,
-    C_BLOCK_COMMENT_MODE,
-    C_LINE_COMMENT_MODE,
-    C_NUMBER_MODE,
-    C_NUMBER_RE,
-    END_SAME_AS_BEGIN,
-    HASH_COMMENT_MODE,
-    IDENT_RE,
-    MATCH_NOTHING_RE,
-    METHOD_GUARD,
-    NUMBER_MODE,
-    NUMBER_RE,
-    PHRASAL_WORDS_MODE,
-    QUOTE_STRING_MODE,
-    REGEXP_MODE,
-    RE_STARTERS_RE,
-    SHEBANG,
-    TITLE_MODE,
-    UNDERSCORE_IDENT_RE,
-    UNDERSCORE_TITLE_MODE
-  });
-  var beforeMatchExt = (mode, parent) => {
-    if (!mode.beforeMatch)
-      return;
-    if (mode.starts)
-      throw new Error("beforeMatch cannot be used with starts");
-    const originalMode = Object.assign({}, mode);
-    Object.keys(mode).forEach((key) => {
-      delete mode[key];
-    });
-    mode.keywords = originalMode.keywords;
-    mode.begin = concat(originalMode.beforeMatch, lookahead(originalMode.begin));
-    mode.starts = {
-      relevance: 0,
-      contains: [
-        Object.assign(originalMode, { endsParent: true })
-      ]
-    };
-    mode.relevance = 0;
-    delete originalMode.beforeMatch;
-  };
-  var COMMON_KEYWORDS = [
-    "of",
-    "and",
-    "for",
-    "in",
-    "not",
-    "or",
-    "if",
-    "then",
-    "parent",
-    "list",
-    "value"
-  ];
-  var DEFAULT_KEYWORD_SCOPE = "keyword";
-  var seenDeprecations = {};
-  var error = (message) => {
-    console.error(message);
-  };
-  var warn = (message, ...args) => {
-    console.log(`WARN: ${message}`, ...args);
-  };
-  var deprecated = (version2, message) => {
-    if (seenDeprecations[`${version2}/${message}`])
-      return;
-    console.log(`Deprecated as of ${version2}. ${message}`);
-    seenDeprecations[`${version2}/${message}`] = true;
-  };
-  var MultiClassError = new Error;
-  var version = "11.10.0";
+  var version = "11.11.1";
 
   class HTMLInjectionError extends Error {
     constructor(reason, html) {
@@ -853,7 +853,8 @@ var require_core = __commonJS((exports, module) => {
         languageName = optionsOrCode.language;
       } else {
         deprecated("10.7.0", "highlight(lang, code, ...args) has been deprecated.");
-        deprecated("10.7.0", "Please use highlight(code, options) instead.\nhttps://github.com/highlightjs/highlight.js/issues/2277");
+        deprecated("10.7.0", `Please use highlight(code, options) instead.
+https://github.com/highlightjs/highlight.js/issues/2277`);
         languageName = codeOrLanguageName;
         code = optionsOrCode;
       }
@@ -1115,6 +1116,8 @@ var require_core = __commonJS((exports, module) => {
           }
         }
         if (match.type === "illegal" && lexeme === "") {
+          modeBuffer += `
+`;
           return 1;
         }
         if (iterations > 1e5 && iterations > match.index * 3) {
@@ -1295,19 +1298,18 @@ var require_core = __commonJS((exports, module) => {
     }
     let wantsHighlight = false;
     function highlightAll() {
+      function boot() {
+        highlightAll();
+      }
       if (document.readyState === "loading") {
+        if (!wantsHighlight) {
+          window.addEventListener("DOMContentLoaded", boot, false);
+        }
         wantsHighlight = true;
         return;
       }
       const blocks = document.querySelectorAll(options.cssSelector);
       blocks.forEach(highlightElement);
-    }
-    function boot() {
-      if (wantsHighlight)
-        highlightAll();
-    }
-    if (typeof window !== "undefined" && window.addEventListener) {
-      window.addEventListener("DOMContentLoaded", boot, false);
     }
     function registerLanguage(languageName, languageDefinition) {
       let lang = null;
@@ -1443,45 +1445,45 @@ var require_core = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/1c.js
 var require_1c = __commonJS((exports, module) => {
   function _1c(hljs) {
-    const UNDERSCORE_IDENT_RE = "[A-Za-z\u0410-\u042F\u0430-\u044F\u0451\u0401_][A-Za-z\u0410-\u042F\u0430-\u044F\u0451\u0401_0-9]+";
-    const v7_keywords = "\u0434\u0430\u043B\u0435\u0435 ";
-    const v8_keywords = "\u0432\u043E\u0437\u0432\u0440\u0430\u0442 \u0432\u044B\u0437\u0432\u0430\u0442\u044C\u0438\u0441\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C \u0434\u043B\u044F \u0435\u0441\u043B\u0438 \u0438 \u0438\u0437 \u0438\u043B\u0438 \u0438\u043D\u0430\u0447\u0435 \u0438\u043D\u0430\u0447\u0435\u0435\u0441\u043B\u0438 \u0438\u0441\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 \u043A\u0430\u0436\u0434\u043E\u0433\u043E \u043A\u043E\u043D\u0435\u0446\u0435\u0441\u043B\u0438 " + "\u043A\u043E\u043D\u0435\u0446\u043F\u043E\u043F\u044B\u0442\u043A\u0438 \u043A\u043E\u043D\u0435\u0446\u0446\u0438\u043A\u043B\u0430 \u043D\u0435 \u043D\u043E\u0432\u044B\u0439 \u043F\u0435\u0440\u0435\u0439\u0442\u0438 \u043F\u0435\u0440\u0435\u043C \u043F\u043E \u043F\u043E\u043A\u0430 \u043F\u043E\u043F\u044B\u0442\u043A\u0430 \u043F\u0440\u0435\u0440\u0432\u0430\u0442\u044C \u043F\u0440\u043E\u0434\u043E\u043B\u0436\u0438\u0442\u044C \u0442\u043E\u0433\u0434\u0430 \u0446\u0438\u043A\u043B \u044D\u043A\u0441\u043F\u043E\u0440\u0442 ";
+    const UNDERSCORE_IDENT_RE = "[A-Za-zА-Яа-яёЁ_][A-Za-zА-Яа-яёЁ_0-9]+";
+    const v7_keywords = "далее ";
+    const v8_keywords = "возврат вызватьисключение выполнить для если и из или иначе иначеесли исключение каждого конецесли " + "конецпопытки конеццикла не новый перейти перем по пока попытка прервать продолжить тогда цикл экспорт ";
     const KEYWORD = v7_keywords + v8_keywords;
-    const v7_meta_keywords = "\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C\u0438\u0437\u0444\u0430\u0439\u043B\u0430 ";
-    const v8_meta_keywords = "\u0432\u0435\u0431\u043A\u043B\u0438\u0435\u043D\u0442 \u0432\u043C\u0435\u0441\u0442\u043E \u0432\u043D\u0435\u0448\u043D\u0435\u0435\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435 \u043A\u043B\u0438\u0435\u043D\u0442 \u043A\u043E\u043D\u0435\u0446\u043E\u0431\u043B\u0430\u0441\u0442\u0438 \u043C\u043E\u0431\u0438\u043B\u044C\u043D\u043E\u0435\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043A\u043B\u0438\u0435\u043D\u0442 \u043C\u043E\u0431\u0438\u043B\u044C\u043D\u043E\u0435\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0441\u0435\u0440\u0432\u0435\u0440 " + "\u043D\u0430\u043A\u043B\u0438\u0435\u043D\u0442\u0435 \u043D\u0430\u043A\u043B\u0438\u0435\u043D\u0442\u0435\u043D\u0430\u0441\u0435\u0440\u0432\u0435\u0440\u0435 \u043D\u0430\u043A\u043B\u0438\u0435\u043D\u0442\u0435\u043D\u0430\u0441\u0435\u0440\u0432\u0435\u0440\u0435\u0431\u0435\u0437\u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u0430 \u043D\u0430\u0441\u0435\u0440\u0432\u0435\u0440\u0435 \u043D\u0430\u0441\u0435\u0440\u0432\u0435\u0440\u0435\u0431\u0435\u0437\u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442\u0430 \u043E\u0431\u043B\u0430\u0441\u0442\u044C \u043F\u0435\u0440\u0435\u0434 " + "\u043F\u043E\u0441\u043B\u0435 \u0441\u0435\u0440\u0432\u0435\u0440 \u0442\u043E\u043B\u0441\u0442\u044B\u0439\u043A\u043B\u0438\u0435\u043D\u0442\u043E\u0431\u044B\u0447\u043D\u043E\u0435\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u0442\u043E\u043B\u0441\u0442\u044B\u0439\u043A\u043B\u0438\u0435\u043D\u0442\u0443\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u043C\u043E\u0435\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u0442\u043E\u043D\u043A\u0438\u0439\u043A\u043B\u0438\u0435\u043D\u0442 ";
+    const v7_meta_keywords = "загрузитьизфайла ";
+    const v8_meta_keywords = "вебклиент вместо внешнеесоединение клиент конецобласти мобильноеприложениеклиент мобильноеприложениесервер " + "наклиенте наклиентенасервере наклиентенасерверебезконтекста насервере насерверебезконтекста область перед " + "после сервер толстыйклиентобычноеприложение толстыйклиентуправляемоеприложение тонкийклиент ";
     const METAKEYWORD = v7_meta_keywords + v8_meta_keywords;
-    const v7_system_constants = "\u0440\u0430\u0437\u0434\u0435\u043B\u0438\u0442\u0435\u043B\u044C\u0441\u0442\u0440\u0430\u043D\u0438\u0446 \u0440\u0430\u0437\u0434\u0435\u043B\u0438\u0442\u0435\u043B\u044C\u0441\u0442\u0440\u043E\u043A \u0441\u0438\u043C\u0432\u043E\u043B\u0442\u0430\u0431\u0443\u043B\u044F\u0446\u0438\u0438 ";
-    const v7_global_context_methods = "ansitooem oemtoansi \u0432\u0432\u0435\u0441\u0442\u0438\u0432\u0438\u0434\u0441\u0443\u0431\u043A\u043E\u043D\u0442\u043E \u0432\u0432\u0435\u0441\u0442\u0438\u043F\u0435\u0440\u0435\u0447\u0438\u0441\u043B\u0435\u043D\u0438\u0435 \u0432\u0432\u0435\u0441\u0442\u0438\u043F\u0435\u0440\u0438\u043E\u0434 \u0432\u0432\u0435\u0441\u0442\u0438\u043F\u043B\u0430\u043D\u0441\u0447\u0435\u0442\u043E\u0432 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u044B\u0439\u043F\u043B\u0430\u043D\u0441\u0447\u0435\u0442\u043E\u0432 " + "\u0434\u0430\u0442\u0430\u0433\u043E\u0434 \u0434\u0430\u0442\u0430\u043C\u0435\u0441\u044F\u0446 \u0434\u0430\u0442\u0430\u0447\u0438\u0441\u043B\u043E \u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A\u0441\u0438\u0441\u0442\u0435\u043C\u044B \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0432\u0441\u0442\u0440\u043E\u043A\u0443 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0438\u0437\u0441\u0442\u0440\u043E\u043A\u0438 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0438\u0431 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F " + "\u043A\u043E\u0434\u0441\u0438\u043C\u0432 \u043A\u043E\u043D\u0433\u043E\u0434\u0430 \u043A\u043E\u043D\u0435\u0446\u043F\u0435\u0440\u0438\u043E\u0434\u0430\u0431\u0438 \u043A\u043E\u043D\u0435\u0446\u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u043D\u043D\u043E\u0433\u043E\u043F\u0435\u0440\u0438\u043E\u0434\u0430\u0431\u0438 \u043A\u043E\u043D\u0435\u0446\u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0433\u043E\u0438\u043D\u0442\u0435\u0440\u0432\u0430\u043B\u0430 \u043A\u043E\u043D\u043A\u0432\u0430\u0440\u0442\u0430\u043B\u0430 \u043A\u043E\u043D\u043C\u0435\u0441\u044F\u0446\u0430 " + "\u043A\u043E\u043D\u043D\u0435\u0434\u0435\u043B\u0438 \u043B\u043E\u0433 \u043B\u043E\u043310 \u043C\u0430\u043A\u0441\u0438\u043C\u0430\u043B\u044C\u043D\u043E\u0435\u043A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E\u0441\u0443\u0431\u043A\u043E\u043D\u0442\u043E \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430 \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435\u043D\u0430\u0431\u043E\u0440\u0430\u043F\u0440\u0430\u0432 \u043D\u0430\u0437\u043D\u0430\u0447\u0438\u0442\u044C\u0432\u0438\u0434 " + "\u043D\u0430\u0437\u043D\u0430\u0447\u0438\u0442\u044C\u0441\u0447\u0435\u0442 \u043D\u0430\u0439\u0442\u0438\u0441\u0441\u044B\u043B\u043A\u0438 \u043D\u0430\u0447\u0430\u043B\u043E\u043F\u0435\u0440\u0438\u043E\u0434\u0430\u0431\u0438 \u043D\u0430\u0447\u0430\u043B\u043E\u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0433\u043E\u0438\u043D\u0442\u0435\u0440\u0432\u0430\u043B\u0430 \u043D\u0430\u0447\u0433\u043E\u0434\u0430 \u043D\u0430\u0447\u043A\u0432\u0430\u0440\u0442\u0430\u043B\u0430 \u043D\u0430\u0447\u043C\u0435\u0441\u044F\u0446\u0430 " + "\u043D\u0430\u0447\u043D\u0435\u0434\u0435\u043B\u0438 \u043D\u043E\u043C\u0435\u0440\u0434\u043D\u044F\u0433\u043E\u0434\u0430 \u043D\u043E\u043C\u0435\u0440\u0434\u043D\u044F\u043D\u0435\u0434\u0435\u043B\u0438 \u043D\u043E\u043C\u0435\u0440\u043D\u0435\u0434\u0435\u043B\u0438\u0433\u043E\u0434\u0430 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430\u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F \u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0439\u0436\u0443\u0440\u043D\u0430\u043B\u0440\u0430\u0441\u0447\u0435\u0442\u043E\u0432 " + "\u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0439\u043F\u043B\u0430\u043D\u0441\u0447\u0435\u0442\u043E\u0432 \u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0439\u044F\u0437\u044B\u043A \u043E\u0447\u0438\u0441\u0442\u0438\u0442\u044C\u043E\u043A\u043D\u043E\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0439 \u043F\u0435\u0440\u0438\u043E\u0434\u0441\u0442\u0440 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0432\u0440\u0435\u043C\u044F\u0442\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0434\u0430\u0442\u0443\u0442\u0430 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0442\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F\u043E\u0442\u0431\u043E\u0440\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043F\u043E\u0437\u0438\u0446\u0438\u044E\u0442\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043F\u0443\u0441\u0442\u043E\u0435\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0442\u0430 " + "\u043F\u0440\u0435\u0444\u0438\u043A\u0441\u0430\u0432\u0442\u043E\u043D\u0443\u043C\u0435\u0440\u0430\u0446\u0438\u0438 \u043F\u0440\u043E\u043F\u0438\u0441\u044C \u043F\u0443\u0441\u0442\u043E\u0435\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0440\u0430\u0437\u043C \u0440\u0430\u0437\u043E\u0431\u0440\u0430\u0442\u044C\u043F\u043E\u0437\u0438\u0446\u0438\u044E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u0442\u044C\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u044B\u043D\u0430 " + "\u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u0442\u044C\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u044B\u043F\u043E \u0441\u0438\u043C\u0432 \u0441\u043E\u0437\u0434\u0430\u0442\u044C\u043E\u0431\u044A\u0435\u043A\u0442 \u0441\u0442\u0430\u0442\u0443\u0441\u0432\u043E\u0437\u0432\u0440\u0430\u0442\u0430 \u0441\u0442\u0440\u043A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u043E\u0441\u0442\u0440\u043E\u043A \u0441\u0444\u043E\u0440\u043C\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u043F\u043E\u0437\u0438\u0446\u0438\u044E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 " + "\u0441\u0447\u0435\u0442\u043F\u043E\u043A\u043E\u0434\u0443 \u0442\u0435\u043A\u0443\u0449\u0435\u0435\u0432\u0440\u0435\u043C\u044F \u0442\u0438\u043F\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F \u0442\u0438\u043F\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F\u0441\u0442\u0440 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0442\u0430\u043D\u0430 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0442\u0430\u043F\u043E \u0444\u0438\u043A\u0441\u0448\u0430\u0431\u043B\u043E\u043D \u0448\u0430\u0431\u043B\u043E\u043D ";
-    const v8_global_context_methods = "acos asin atan base64\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 base64\u0441\u0442\u0440\u043E\u043A\u0430 cos exp log log10 pow sin sqrt tan xml\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 xml\u0441\u0442\u0440\u043E\u043A\u0430 " + "xml\u0442\u0438\u043F xml\u0442\u0438\u043F\u0437\u043D\u0447 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0435\u043E\u043A\u043D\u043E \u0431\u0435\u0437\u043E\u043F\u0430\u0441\u043D\u044B\u0439\u0440\u0435\u0436\u0438\u043C \u0431\u0435\u0437\u043E\u043F\u0430\u0441\u043D\u044B\u0439\u0440\u0435\u0436\u0438\u043C\u0440\u0430\u0437\u0434\u0435\u043B\u0435\u043D\u0438\u044F\u0434\u0430\u043D\u043D\u044B\u0445 \u0431\u0443\u043B\u0435\u0432\u043E \u0432\u0432\u0435\u0441\u0442\u0438\u0434\u0430\u0442\u0443 \u0432\u0432\u0435\u0441\u0442\u0438\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 " + "\u0432\u0432\u0435\u0441\u0442\u0438\u0441\u0442\u0440\u043E\u043A\u0443 \u0432\u0432\u0435\u0441\u0442\u0438\u0447\u0438\u0441\u043B\u043E \u0432\u043E\u0437\u043C\u043E\u0436\u043D\u043E\u0441\u0442\u044C\u0447\u0442\u0435\u043D\u0438\u044Fxml \u0432\u043E\u043F\u0440\u043E\u0441 \u0432\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0432\u0440\u0435\u0433 \u0432\u044B\u0433\u0440\u0443\u0437\u0438\u0442\u044C\u0436\u0443\u0440\u043D\u0430\u043B\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 " + "\u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0443\u043E\u043F\u043E\u0432\u0435\u0449\u0435\u043D\u0438\u044F \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C\u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443\u043F\u0440\u0430\u0432\u0434\u043E\u0441\u0442\u0443\u043F\u0430 \u0432\u044B\u0447\u0438\u0441\u043B\u0438\u0442\u044C \u0433\u043E\u0434 \u0434\u0430\u043D\u043D\u044B\u0435\u0444\u043E\u0440\u043C\u044B\u0432\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0434\u0430\u0442\u0430 \u0434\u0435\u043D\u044C \u0434\u0435\u043D\u044C\u0433\u043E\u0434\u0430 " + "\u0434\u0435\u043D\u044C\u043D\u0435\u0434\u0435\u043B\u0438 \u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C\u043C\u0435\u0441\u044F\u0446 \u0437\u0430\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u0434\u0430\u043D\u043D\u044B\u0435\u0434\u043B\u044F\u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0437\u0430\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u0440\u0430\u0431\u043E\u0442\u0443\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044C\u0440\u0430\u0431\u043E\u0442\u0443\u0441\u0438\u0441\u0442\u0435\u043C\u044B " + "\u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044C\u0432\u043D\u0435\u0448\u043D\u044E\u044E\u043A\u043E\u043C\u043F\u043E\u043D\u0435\u043D\u0442\u0443 \u0437\u0430\u043A\u0440\u044B\u0442\u044C\u0441\u043F\u0440\u0430\u0432\u043A\u0443 \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044Cjson \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044Cxml \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C\u0434\u0430\u0442\u0443json \u0437\u0430\u043F\u0438\u0441\u044C\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 " + "\u0437\u0430\u043F\u043E\u043B\u043D\u0438\u0442\u044C\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F\u0441\u0432\u043E\u0439\u0441\u0442\u0432 \u0437\u0430\u043F\u0440\u043E\u0441\u0438\u0442\u044C\u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u0435\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C\u0441\u0438\u0441\u0442\u0435\u043C\u0443 \u0437\u0430\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E " + "\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0432\u0434\u0430\u043D\u043D\u044B\u0435\u0444\u043E\u0440\u043C\u044B \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0432\u0441\u0442\u0440\u043E\u043A\u0443\u0432\u043D\u0443\u0442\u0440 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0432\u0444\u0430\u0439\u043B \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u043E \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0438\u0437\u0441\u0442\u0440\u043E\u043A\u0438\u0432\u043D\u0443\u0442\u0440 \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0438\u0437\u0444\u0430\u0439\u043B\u0430 " + "\u0438\u0437xml\u0442\u0438\u043F\u0430 \u0438\u043C\u043F\u043E\u0440\u0442\u043C\u043E\u0434\u0435\u043B\u0438xdto \u0438\u043C\u044F\u043A\u043E\u043C\u043F\u044C\u044E\u0442\u0435\u0440\u0430 \u0438\u043C\u044F\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0438\u043D\u0438\u0446\u0438\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u043F\u0440\u0435\u0434\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u043D\u044B\u0435\u0434\u0430\u043D\u043D\u044B\u0435 \u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u044F\u043E\u0431\u043E\u0448\u0438\u0431\u043A\u0435 " + "\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0431\u0438\u0431\u043B\u0438\u043E\u0442\u0435\u043A\u0438\u043C\u043E\u0431\u0438\u043B\u044C\u043D\u043E\u0433\u043E\u0443\u0441\u0442\u0440\u043E\u0439\u0441\u0442\u0432\u0430 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445\u0444\u0430\u0439\u043B\u043E\u0432 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432 \u043A\u0430\u0442\u0430\u043B\u043E\u0433\u043F\u0440\u043E\u0433\u0440\u0430\u043C\u043C\u044B \u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u0441\u0442\u0440\u043E\u043A\u0443 " + "\u043A\u043E\u0434\u043B\u043E\u043A\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u0438\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B \u043A\u043E\u0434\u0441\u0438\u043C\u0432\u043E\u043B\u0430 \u043A\u043E\u043C\u0430\u043D\u0434\u0430\u0441\u0438\u0441\u0442\u0435\u043C\u044B \u043A\u043E\u043D\u0435\u0446\u0433\u043E\u0434\u0430 \u043A\u043E\u043D\u0435\u0446\u0434\u043D\u044F \u043A\u043E\u043D\u0435\u0446\u043A\u0432\u0430\u0440\u0442\u0430\u043B\u0430 \u043A\u043E\u043D\u0435\u0446\u043C\u0435\u0441\u044F\u0446\u0430 \u043A\u043E\u043D\u0435\u0446\u043C\u0438\u043D\u0443\u0442\u044B " + "\u043A\u043E\u043D\u0435\u0446\u043D\u0435\u0434\u0435\u043B\u0438 \u043A\u043E\u043D\u0435\u0446\u0447\u0430\u0441\u0430 \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044F\u0431\u0430\u0437\u044B\u0434\u0430\u043D\u043D\u044B\u0445\u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0430\u0434\u0438\u043D\u0430\u043C\u0438\u0447\u0435\u0441\u043A\u0438 \u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u044F\u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0430 \u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u0434\u0430\u043D\u043D\u044B\u0435\u0444\u043E\u0440\u043C\u044B " + "\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u0444\u0430\u0439\u043B \u043A\u0440\u0430\u0442\u043A\u043E\u0435\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043E\u0448\u0438\u0431\u043A\u0438 \u043B\u0435\u0432 \u043C\u0430\u043A\u0441 \u043C\u0435\u0441\u0442\u043D\u043E\u0435\u0432\u0440\u0435\u043C\u044F \u043C\u0435\u0441\u044F\u0446 \u043C\u0438\u043D \u043C\u0438\u043D\u0443\u0442\u0430 \u043C\u043E\u043D\u043E\u043F\u043E\u043B\u044C\u043D\u044B\u0439\u0440\u0435\u0436\u0438\u043C \u043D\u0430\u0439\u0442\u0438 " + "\u043D\u0430\u0439\u0442\u0438\u043D\u0435\u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u044B\u0435\u0441\u0438\u043C\u0432\u043E\u043B\u044Bxml \u043D\u0430\u0439\u0442\u0438\u043E\u043A\u043D\u043E\u043F\u043E\u043D\u0430\u0432\u0438\u0433\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0441\u0441\u044B\u043B\u043A\u0435 \u043D\u0430\u0439\u0442\u0438\u043F\u043E\u043C\u0435\u0447\u0435\u043D\u043D\u044B\u0435\u043D\u0430\u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435 \u043D\u0430\u0439\u0442\u0438\u043F\u043E\u0441\u0441\u044B\u043B\u043A\u0430\u043C \u043D\u0430\u0439\u0442\u0438\u0444\u0430\u0439\u043B\u044B " + "\u043D\u0430\u0447\u0430\u043B\u043E\u0433\u043E\u0434\u0430 \u043D\u0430\u0447\u0430\u043B\u043E\u0434\u043D\u044F \u043D\u0430\u0447\u0430\u043B\u043E\u043A\u0432\u0430\u0440\u0442\u0430\u043B\u0430 \u043D\u0430\u0447\u0430\u043B\u043E\u043C\u0435\u0441\u044F\u0446\u0430 \u043D\u0430\u0447\u0430\u043B\u043E\u043C\u0438\u043D\u0443\u0442\u044B \u043D\u0430\u0447\u0430\u043B\u043E\u043D\u0435\u0434\u0435\u043B\u0438 \u043D\u0430\u0447\u0430\u043B\u043E\u0447\u0430\u0441\u0430 \u043D\u0430\u0447\u0430\u0442\u044C\u0437\u0430\u043F\u0440\u043E\u0441\u0440\u0430\u0437\u0440\u0435\u0448\u0435\u043D\u0438\u044F\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F " + "\u043D\u0430\u0447\u0430\u0442\u044C\u0437\u0430\u043F\u0443\u0441\u043A\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u043D\u0430\u0447\u0430\u0442\u044C\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435\u0444\u0430\u0439\u043B\u0430 \u043D\u0430\u0447\u0430\u0442\u044C\u043F\u0435\u0440\u0435\u043C\u0435\u0449\u0435\u043D\u0438\u0435\u0444\u0430\u0439\u043B\u0430 \u043D\u0430\u0447\u0430\u0442\u044C\u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435\u0432\u043D\u0435\u0448\u043D\u0435\u0439\u043A\u043E\u043C\u043F\u043E\u043D\u0435\u043D\u0442\u044B " + "\u043D\u0430\u0447\u0430\u0442\u044C\u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F\u0440\u0430\u0431\u043E\u0442\u044B\u0441\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0435\u0439 \u043D\u0430\u0447\u0430\u0442\u044C\u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F\u0440\u0430\u0431\u043E\u0442\u044B\u0441\u0444\u0430\u0439\u043B\u0430\u043C\u0438 \u043D\u0430\u0447\u0430\u0442\u044C\u043F\u043E\u0438\u0441\u043A\u0444\u0430\u0439\u043B\u043E\u0432 " + "\u043D\u0430\u0447\u0430\u0442\u044C\u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0445\u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430\u0447\u0430\u0442\u044C\u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432 \u043D\u0430\u0447\u0430\u0442\u044C\u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435\u0440\u0430\u0431\u043E\u0447\u0435\u0433\u043E\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430\u0434\u0430\u043D\u043D\u044B\u0445\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F " + "\u043D\u0430\u0447\u0430\u0442\u044C\u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435\u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430\u0447\u0430\u0442\u044C\u043F\u043E\u043C\u0435\u0449\u0435\u043D\u0438\u0435\u0444\u0430\u0439\u043B\u0430 \u043D\u0430\u0447\u0430\u0442\u044C\u043F\u043E\u043C\u0435\u0449\u0435\u043D\u0438\u0435\u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430\u0447\u0430\u0442\u044C\u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0435\u0434\u0432\u043E\u0438\u0447\u043D\u044B\u0445\u0434\u0430\u043D\u043D\u044B\u0445\u0438\u0437\u0444\u0430\u0439\u043B\u0430 \u043D\u0430\u0447\u0430\u0442\u044C\u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0435\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0430 " + "\u043D\u0430\u0447\u0430\u0442\u044C\u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E \u043D\u0430\u0447\u0430\u0442\u044C\u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435\u0444\u0430\u0439\u043B\u043E\u0432 \u043D\u0430\u0447\u0430\u0442\u044C\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0443\u0432\u043D\u0435\u0448\u043D\u0435\u0439\u043A\u043E\u043C\u043F\u043E\u043D\u0435\u043D\u0442\u044B \u043D\u0430\u0447\u0430\u0442\u044C\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0443\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F\u0440\u0430\u0431\u043E\u0442\u044B\u0441\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0435\u0439 " + "\u043D\u0430\u0447\u0430\u0442\u044C\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0443\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F\u0440\u0430\u0431\u043E\u0442\u044B\u0441\u0444\u0430\u0439\u043B\u0430\u043C\u0438 \u043D\u0435\u0434\u0435\u043B\u044F\u0433\u043E\u0434\u0430 \u043D\u0435\u043E\u0431\u0445\u043E\u0434\u0438\u043C\u043E\u0441\u0442\u044C\u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u044F\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F \u043D\u043E\u043C\u0435\u0440\u0441\u0435\u0430\u043D\u0441\u0430\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B " + "\u043D\u043E\u043C\u0435\u0440\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B \u043D\u0440\u0435\u0433 \u043D\u0441\u0442\u0440 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C\u043D\u0443\u043C\u0435\u0440\u0430\u0446\u0438\u044E\u043E\u0431\u044A\u0435\u043A\u0442\u043E\u0432 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u044C\u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u043C\u044B\u0435\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F " + "\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430\u043F\u0440\u0435\u0440\u044B\u0432\u0430\u043D\u0438\u044F\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u043E\u0431\u044A\u0435\u0434\u0438\u043D\u0438\u0442\u044C\u0444\u0430\u0439\u043B\u044B \u043E\u043A\u0440 \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435\u043E\u0448\u0438\u0431\u043A\u0438 \u043E\u043F\u043E\u0432\u0435\u0441\u0442\u0438\u0442\u044C \u043E\u043F\u043E\u0432\u0435\u0441\u0442\u0438\u0442\u044C\u043E\u0431\u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438 " + "\u043E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u0437\u0430\u043F\u0440\u043E\u0441\u0430\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A\u043A\u043B\u0438\u0435\u043D\u0442\u0430\u043B\u0438\u0446\u0435\u043D\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F \u043E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u043E\u043F\u043E\u0432\u0435\u0449\u0435\u043D\u0438\u044F " + "\u043E\u0442\u043A\u0440\u044B\u0442\u044C\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043E\u0442\u043A\u0440\u044B\u0442\u044C\u0438\u043D\u0434\u0435\u043A\u0441\u0441\u043F\u0440\u0430\u0432\u043A\u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C\u0441\u043E\u0434\u0435\u0440\u0436\u0430\u043D\u0438\u0435\u0441\u043F\u0440\u0430\u0432\u043A\u0438 \u043E\u0442\u043A\u0440\u044B\u0442\u044C\u0441\u043F\u0440\u0430\u0432\u043A\u0443 \u043E\u0442\u043A\u0440\u044B\u0442\u044C\u0444\u043E\u0440\u043C\u0443 \u043E\u0442\u043A\u0440\u044B\u0442\u044C\u0444\u043E\u0440\u043C\u0443\u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E " + "\u043E\u0442\u043C\u0435\u043D\u0438\u0442\u044C\u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E \u043E\u0447\u0438\u0441\u0442\u0438\u0442\u044C\u0436\u0443\u0440\u043D\u0430\u043B\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u043E\u0447\u0438\u0441\u0442\u0438\u0442\u044C\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u043E\u0447\u0438\u0441\u0442\u0438\u0442\u044C\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B\u0434\u043E\u0441\u0442\u0443\u043F\u0430 " + "\u043F\u0435\u0440\u0435\u0439\u0442\u0438\u043F\u043E\u043D\u0430\u0432\u0438\u0433\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0441\u0441\u044B\u043B\u043A\u0435 \u043F\u0435\u0440\u0435\u043C\u0435\u0441\u0442\u0438\u0442\u044C\u0444\u0430\u0439\u043B \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u0432\u043D\u0435\u0448\u043D\u044E\u044E\u043A\u043E\u043C\u043F\u043E\u043D\u0435\u043D\u0442\u0443 " + "\u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u0437\u0430\u043F\u0440\u043E\u0441\u0430\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A\u043A\u043B\u0438\u0435\u043D\u0442\u0430\u043B\u0438\u0446\u0435\u043D\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u0447\u0438\u043A\u043E\u043F\u043E\u0432\u0435\u0449\u0435\u043D\u0438\u044F " + "\u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435\u0440\u0430\u0431\u043E\u0442\u044B\u0441\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0435\u0439 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0438\u0442\u044C\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435\u0440\u0430\u0431\u043E\u0442\u044B\u0441\u0444\u0430\u0439\u043B\u0430\u043C\u0438 \u043F\u043E\u0434\u0440\u043E\u0431\u043D\u043E\u0435\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043E\u0448\u0438\u0431\u043A\u0438 " + "\u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C\u0432\u0432\u043E\u0434\u0434\u0430\u0442\u044B \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C\u0432\u0432\u043E\u0434\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C\u0432\u0432\u043E\u0434\u0441\u0442\u0440\u043E\u043A\u0438 \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C\u0432\u0432\u043E\u0434\u0447\u0438\u0441\u043B\u0430 \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C\u0432\u043E\u043F\u0440\u043E\u0441 \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 " + "\u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u044E\u043E\u0431\u043E\u0448\u0438\u0431\u043A\u0435 \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C\u043D\u0430\u043A\u0430\u0440\u0442\u0435 \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C\u043E\u043F\u043E\u0432\u0435\u0449\u0435\u043D\u0438\u0435\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u043F\u043E\u043A\u0430\u0437\u0430\u0442\u044C\u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435 \u043F\u043E\u043B\u043D\u043E\u0435\u0438\u043C\u044F\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044Ccom\u043E\u0431\u044A\u0435\u043A\u0442 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044Cxml\u0442\u0438\u043F \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0430\u0434\u0440\u0435\u0441\u043F\u043E\u043C\u0435\u0441\u0442\u043E\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u044E \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u043A\u0443\u0441\u0435\u0430\u043D\u0441\u043E\u0432 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0432\u0440\u0435\u043C\u044F\u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u044F\u0441\u043F\u044F\u0449\u0435\u0433\u043E\u0441\u0435\u0430\u043D\u0441\u0430 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0432\u0440\u0435\u043C\u044F\u0437\u0430\u0441\u044B\u043F\u0430\u043D\u0438\u044F\u043F\u0430\u0441\u0441\u0438\u0432\u043D\u043E\u0433\u043E\u0441\u0435\u0430\u043D\u0441\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0432\u0440\u0435\u043C\u044F\u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0434\u0430\u043D\u043D\u044B\u0435\u0432\u044B\u0431\u043E\u0440\u0430 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0434\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u044B\u0439\u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u043A\u043B\u0438\u0435\u043D\u0442\u0430\u043B\u0438\u0446\u0435\u043D\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u044B\u0435\u043A\u043E\u0434\u044B\u043B\u043E\u043A\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u0438 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u044B\u0435\u0447\u0430\u0441\u043E\u0432\u044B\u0435\u043F\u043E\u044F\u0441\u0430 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A\u0441\u0438\u0441\u0442\u0435\u043C\u044B \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F\u043E\u0442\u0431\u043E\u0440\u0430\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0438\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440\u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0438\u0437\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E\u0433\u043E\u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0438\u043C\u044F\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E\u0433\u043E\u0444\u0430\u0439\u043B\u0430 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0438\u043C\u044F\u043A\u043B\u0438\u0435\u043D\u0442\u0430\u043B\u0438\u0446\u0435\u043D\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u044E\u044D\u043A\u0440\u0430\u043D\u043E\u0432\u043A\u043B\u0438\u0435\u043D\u0442\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0441\u043E\u0431\u044B\u0442\u0438\u044F\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043A\u0440\u0430\u0442\u043A\u0438\u0439\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043C\u0430\u043A\u0435\u0442\u043E\u0444\u043E\u0440\u043C\u043B\u0435\u043D\u0438\u044F " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043C\u0430\u0441\u043A\u0443\u0432\u0441\u0435\u0444\u0430\u0439\u043B\u044B \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043C\u0430\u0441\u043A\u0443\u0432\u0441\u0435\u0444\u0430\u0439\u043B\u044B\u043A\u043B\u0438\u0435\u043D\u0442\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043C\u0430\u0441\u043A\u0443\u0432\u0441\u0435\u0444\u0430\u0439\u043B\u044B\u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043C\u0435\u0441\u0442\u043E\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043F\u043E\u0430\u0434\u0440\u0435\u0441\u0443 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043C\u0438\u043D\u0438\u043C\u0430\u043B\u044C\u043D\u0443\u044E\u0434\u043B\u0438\u043D\u0443\u043F\u0430\u0440\u043E\u043B\u0435\u0439\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0435\u0439 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043D\u0430\u0432\u0438\u0433\u0430\u0446\u0438\u043E\u043D\u043D\u0443\u044E\u0441\u0441\u044B\u043B\u043A\u0443 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043D\u0430\u0432\u0438\u0433\u0430\u0446\u0438\u043E\u043D\u043D\u0443\u044E\u0441\u0441\u044B\u043B\u043A\u0443\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435\u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438\u0431\u0430\u0437\u044B\u0434\u0430\u043D\u043D\u044B\u0445 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0440\u0435\u0434\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u043D\u044B\u0445\u0434\u0430\u043D\u043D\u044B\u0445\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043E\u0431\u0449\u0438\u0439\u043C\u0430\u043A\u0435\u0442 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043E\u0431\u0449\u0443\u044E\u0444\u043E\u0440\u043C\u0443 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043E\u043A\u043D\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043E\u043F\u0435\u0440\u0430\u0442\u0438\u0432\u043D\u0443\u044E\u043E\u0442\u043C\u0435\u0442\u043A\u0443\u0432\u0440\u0435\u043C\u0435\u043D\u0438 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435\u0431\u0435\u0437\u043E\u043F\u0430\u0441\u043D\u043E\u0433\u043E\u0440\u0435\u0436\u0438\u043C\u0430 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B\u0444\u0443\u043D\u043A\u0446\u0438\u043E\u043D\u0430\u043B\u044C\u043D\u044B\u0445\u043E\u043F\u0446\u0438\u0439\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043F\u043E\u043B\u043D\u043E\u0435\u0438\u043C\u044F\u043F\u0440\u0435\u0434\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u043D\u043E\u0433\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u044F\u043D\u0430\u0432\u0438\u0433\u0430\u0446\u0438\u043E\u043D\u043D\u044B\u0445\u0441\u0441\u044B\u043B\u043E\u043A \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443\u0441\u043B\u043E\u0436\u043D\u043E\u0441\u0442\u0438\u043F\u0430\u0440\u043E\u043B\u0435\u0439\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0435\u0439 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0440\u0430\u0437\u0434\u0435\u043B\u0438\u0442\u0435\u043B\u044C\u043F\u0443\u0442\u0438 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0440\u0430\u0437\u0434\u0435\u043B\u0438\u0442\u0435\u043B\u044C\u043F\u0443\u0442\u0438\u043A\u043B\u0438\u0435\u043D\u0442\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0440\u0430\u0437\u0434\u0435\u043B\u0438\u0442\u0435\u043B\u044C\u043F\u0443\u0442\u0438\u0441\u0435\u0440\u0432\u0435\u0440\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0441\u0435\u0430\u043D\u0441\u044B\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0441\u043A\u043E\u0440\u043E\u0441\u0442\u044C\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044E " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u0435\u043E\u0431\u044A\u0435\u043A\u0442\u0430\u0438\u0444\u043E\u0440\u043C\u044B \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0441\u043E\u0441\u0442\u0430\u0432\u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0433\u043E\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430odata \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0441\u0442\u0440\u0443\u043A\u0442\u0443\u0440\u0443\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u044F\u0431\u0430\u0437\u044B\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0442\u0435\u043A\u0443\u0449\u0438\u0439\u0441\u0435\u0430\u043D\u0441\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0444\u0430\u0439\u043B \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0444\u0430\u0439\u043B\u044B \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0444\u043E\u0440\u043C\u0443 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0444\u0443\u043D\u043A\u0446\u0438\u043E\u043D\u0430\u043B\u044C\u043D\u0443\u044E\u043E\u043F\u0446\u0438\u044E " + "\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0444\u0443\u043D\u043A\u0446\u0438\u043E\u043D\u0430\u043B\u044C\u043D\u0443\u044E\u043E\u043F\u0446\u0438\u044E\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430 \u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0447\u0430\u0441\u043E\u0432\u043E\u0439\u043F\u043E\u044F\u0441\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0438\u043E\u0441 \u043F\u043E\u043C\u0435\u0441\u0442\u0438\u0442\u044C\u0432\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E\u0435\u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435 " + "\u043F\u043E\u043C\u0435\u0441\u0442\u0438\u0442\u044C\u0444\u0430\u0439\u043B \u043F\u043E\u043C\u0435\u0441\u0442\u0438\u0442\u044C\u0444\u0430\u0439\u043B\u044B \u043F\u0440\u0430\u0432 \u043F\u0440\u0430\u0432\u043E\u0434\u043E\u0441\u0442\u0443\u043F\u0430 \u043F\u0440\u0435\u0434\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u043D\u043E\u0435\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043A\u043E\u0434\u0430\u043B\u043E\u043A\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u0438 \u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0435\u0440\u0438\u043E\u0434\u0430 " + "\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0440\u0430\u0432\u0430 \u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u0441\u043E\u0431\u044B\u0442\u0438\u044F\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u0447\u0430\u0441\u043E\u0432\u043E\u0433\u043E\u043F\u043E\u044F\u0441\u0430 \u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u0435 " + "\u043F\u0440\u0435\u043A\u0440\u0430\u0442\u0438\u0442\u044C\u0440\u0430\u0431\u043E\u0442\u0443\u0441\u0438\u0441\u0442\u0435\u043C\u044B \u043F\u0440\u0438\u0432\u0438\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439\u0440\u0435\u0436\u0438\u043C \u043F\u0440\u043E\u0434\u043E\u043B\u0436\u0438\u0442\u044C\u0432\u044B\u0437\u043E\u0432 \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044Cjson \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044Cxml \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C\u0434\u0430\u0442\u0443json \u043F\u0443\u0441\u0442\u0430\u044F\u0441\u0442\u0440\u043E\u043A\u0430 " + "\u0440\u0430\u0431\u043E\u0447\u0438\u0439\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u0434\u0430\u043D\u043D\u044B\u0445\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0440\u0430\u0437\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u0434\u0430\u043D\u043D\u044B\u0435\u0434\u043B\u044F\u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0440\u0430\u0437\u0434\u0435\u043B\u0438\u0442\u044C\u0444\u0430\u0439\u043B \u0440\u0430\u0437\u043E\u0440\u0432\u0430\u0442\u044C\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u0441\u0432\u043D\u0435\u0448\u043D\u0438\u043C\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u043E\u043C\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0440\u0430\u0441\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u0441\u0442\u0440\u043E\u043A\u0443 \u0440\u043E\u043B\u044C\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0430 \u0441\u0435\u043A\u0443\u043D\u0434\u0430 \u0441\u0438\u0433\u043D\u0430\u043B \u0441\u0438\u043C\u0432\u043E\u043B \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u0436\u0443\u0440\u043D\u0430\u043B\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u0441\u043C\u0435\u0449\u0435\u043D\u0438\u0435\u043B\u0435\u0442\u043D\u0435\u0433\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u0438 " + "\u0441\u043C\u0435\u0449\u0435\u043D\u0438\u0435\u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0433\u043E\u0432\u0440\u0435\u043C\u0435\u043D\u0438 \u0441\u043E\u0435\u0434\u0438\u043D\u0438\u0442\u044C\u0431\u0443\u0444\u0435\u0440\u044B\u0434\u0432\u043E\u0438\u0447\u043D\u044B\u0445\u0434\u0430\u043D\u043D\u044B\u0445 \u0441\u043E\u0437\u0434\u0430\u0442\u044C\u043A\u0430\u0442\u0430\u043B\u043E\u0433 \u0441\u043E\u0437\u0434\u0430\u0442\u044C\u0444\u0430\u0431\u0440\u0438\u043A\u0443xdto \u0441\u043E\u043A\u0440\u043B \u0441\u043E\u043A\u0440\u043B\u043F \u0441\u043E\u043A\u0440\u043F \u0441\u043E\u043E\u0431\u0449\u0438\u0442\u044C " + "\u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435 \u0441\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0441\u0440\u0435\u0434 \u0441\u0442\u0440\u0434\u043B\u0438\u043D\u0430 \u0441\u0442\u0440\u0437\u0430\u043A\u0430\u043D\u0447\u0438\u0432\u0430\u0435\u0442\u0441\u044F\u043D\u0430 \u0441\u0442\u0440\u0437\u0430\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0442\u0440\u043D\u0430\u0439\u0442\u0438 \u0441\u0442\u0440\u043D\u0430\u0447\u0438\u043D\u0430\u0435\u0442\u0441\u044F\u0441 " + "\u0441\u0442\u0440\u043E\u043A\u0430 \u0441\u0442\u0440\u043E\u043A\u0430\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B \u0441\u0442\u0440\u043F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0441\u0442\u0440\u043E\u043A\u0443 \u0441\u0442\u0440\u0440\u0430\u0437\u0434\u0435\u043B\u0438\u0442\u044C \u0441\u0442\u0440\u0441\u043E\u0435\u0434\u0438\u043D\u0438\u0442\u044C \u0441\u0442\u0440\u0441\u0440\u0430\u0432\u043D\u0438\u0442\u044C \u0441\u0442\u0440\u0447\u0438\u0441\u043B\u043E\u0432\u0445\u043E\u0436\u0434\u0435\u043D\u0438\u0439 " + "\u0441\u0442\u0440\u0447\u0438\u0441\u043B\u043E\u0441\u0442\u0440\u043E\u043A \u0441\u0442\u0440\u0448\u0430\u0431\u043B\u043E\u043D \u0442\u0435\u043A\u0443\u0449\u0430\u044F\u0434\u0430\u0442\u0430 \u0442\u0435\u043A\u0443\u0449\u0430\u044F\u0434\u0430\u0442\u0430\u0441\u0435\u0430\u043D\u0441\u0430 \u0442\u0435\u043A\u0443\u0449\u0430\u044F\u0443\u043D\u0438\u0432\u0435\u0440\u0441\u0430\u043B\u044C\u043D\u0430\u044F\u0434\u0430\u0442\u0430 \u0442\u0435\u043A\u0443\u0449\u0430\u044F\u0443\u043D\u0438\u0432\u0435\u0440\u0441\u0430\u043B\u044C\u043D\u0430\u044F\u0434\u0430\u0442\u0430\u0432\u043C\u0438\u043B\u043B\u0438\u0441\u0435\u043A\u0443\u043D\u0434\u0430\u0445 " + "\u0442\u0435\u043A\u0443\u0449\u0438\u0439\u0432\u0430\u0440\u0438\u0430\u043D\u0442\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0442\u0435\u043A\u0443\u0449\u0438\u0439\u0432\u0430\u0440\u0438\u0430\u043D\u0442\u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0433\u043E\u0448\u0440\u0438\u0444\u0442\u0430\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0442\u0435\u043A\u0443\u0449\u0438\u0439\u043A\u043E\u0434\u043B\u043E\u043A\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u0438 " + "\u0442\u0435\u043A\u0443\u0449\u0438\u0439\u0440\u0435\u0436\u0438\u043C\u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u0442\u0435\u043A\u0443\u0449\u0438\u0439\u044F\u0437\u044B\u043A \u0442\u0435\u043A\u0443\u0449\u0438\u0439\u044F\u0437\u044B\u043A\u0441\u0438\u0441\u0442\u0435\u043C\u044B \u0442\u0438\u043F \u0442\u0438\u043F\u0437\u043D\u0447 \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F\u0430\u043A\u0442\u0438\u0432\u043D\u0430 \u0442\u0440\u0435\u0433 \u0443\u0434\u0430\u043B\u0438\u0442\u044C\u0434\u0430\u043D\u043D\u044B\u0435\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B " + "\u0443\u0434\u0430\u043B\u0438\u0442\u044C\u0438\u0437\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E\u0433\u043E\u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430 \u0443\u0434\u0430\u043B\u0438\u0442\u044C\u043E\u0431\u044A\u0435\u043A\u0442\u044B \u0443\u0434\u0430\u043B\u0438\u0442\u044C\u0444\u0430\u0439\u043B\u044B \u0443\u043D\u0438\u0432\u0435\u0440\u0441\u0430\u043B\u044C\u043D\u043E\u0435\u0432\u0440\u0435\u043C\u044F \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0431\u0435\u0437\u043E\u043F\u0430\u0441\u043D\u044B\u0439\u0440\u0435\u0436\u0438\u043C " + "\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0431\u0435\u0437\u043E\u043F\u0430\u0441\u043D\u044B\u0439\u0440\u0435\u0436\u0438\u043C\u0440\u0430\u0437\u0434\u0435\u043B\u0435\u043D\u0438\u044F\u0434\u0430\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u043A\u0443\u0441\u0435\u0430\u043D\u0441\u043E\u0432 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0432\u043D\u0435\u0448\u043D\u044E\u044E\u043A\u043E\u043C\u043F\u043E\u043D\u0435\u043D\u0442\u0443 " + "\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0432\u0440\u0435\u043C\u044F\u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u0438\u044F\u0441\u043F\u044F\u0449\u0435\u0433\u043E\u0441\u0435\u0430\u043D\u0441\u0430 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0432\u0440\u0435\u043C\u044F\u0437\u0430\u0441\u044B\u043F\u0430\u043D\u0438\u044F\u043F\u0430\u0441\u0441\u0438\u0432\u043D\u043E\u0433\u043E\u0441\u0435\u0430\u043D\u0441\u0430 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0432\u0440\u0435\u043C\u044F\u043E\u0436\u0438\u0434\u0430\u043D\u0438\u044F\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A\u0441\u0438\u0441\u0442\u0435\u043C\u044B \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 " + "\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0441\u043E\u0431\u044B\u0442\u0438\u044F\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u043A\u0440\u0430\u0442\u043A\u0438\u0439\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043E\u043A\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F " + "\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u043C\u0438\u043D\u0438\u043C\u0430\u043B\u044C\u043D\u0443\u044E\u0434\u043B\u0438\u043D\u0443\u043F\u0430\u0440\u043E\u043B\u0435\u0439\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0435\u0439 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u043C\u043E\u043D\u043E\u043F\u043E\u043B\u044C\u043D\u044B\u0439\u0440\u0435\u0436\u0438\u043C \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438\u043A\u043B\u0438\u0435\u043D\u0442\u0430\u043B\u0438\u0446\u0435\u043D\u0437\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F " + "\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0440\u0435\u0434\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u043D\u044B\u0445\u0434\u0430\u043D\u043D\u044B\u0445\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u043E\u0442\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435\u0431\u0435\u0437\u043E\u043F\u0430\u0441\u043D\u043E\u0433\u043E\u0440\u0435\u0436\u0438\u043C\u0430 " + "\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B\u0444\u0443\u043D\u043A\u0446\u0438\u043E\u043D\u0430\u043B\u044C\u043D\u044B\u0445\u043E\u043F\u0446\u0438\u0439\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u043F\u0440\u0438\u0432\u0438\u043B\u0435\u0433\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439\u0440\u0435\u0436\u0438\u043C " + "\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0443\u0441\u043B\u043E\u0436\u043D\u043E\u0441\u0442\u0438\u043F\u0430\u0440\u043E\u043B\u0435\u0439\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0435\u0439 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435\u0440\u0430\u0431\u043E\u0442\u044B\u0441\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0435\u0439 " + "\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435\u0440\u0430\u0431\u043E\u0442\u044B\u0441\u0444\u0430\u0439\u043B\u0430\u043C\u0438 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u0441\u0432\u043D\u0435\u0448\u043D\u0438\u043C\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u043E\u043C\u0434\u0430\u043D\u043D\u044B\u0445 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u0435\u043E\u0431\u044A\u0435\u043A\u0442\u0430\u0438\u0444\u043E\u0440\u043C\u044B " + "\u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0441\u043E\u0441\u0442\u0430\u0432\u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0433\u043E\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430odata \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0447\u0430\u0441\u043E\u0432\u043E\u0439\u043F\u043E\u044F\u0441\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C\u0447\u0430\u0441\u043E\u0432\u043E\u0439\u043F\u043E\u044F\u0441\u0441\u0435\u0430\u043D\u0441\u0430 " + "\u0444\u043E\u0440\u043C\u0430\u0442 \u0446\u0435\u043B \u0447\u0430\u0441 \u0447\u0430\u0441\u043E\u0432\u043E\u0439\u043F\u043E\u044F\u0441 \u0447\u0430\u0441\u043E\u0432\u043E\u0439\u043F\u043E\u044F\u0441\u0441\u0435\u0430\u043D\u0441\u0430 \u0447\u0438\u0441\u043B\u043E \u0447\u0438\u0441\u043B\u043E\u043F\u0440\u043E\u043F\u0438\u0441\u044C\u044E \u044D\u0442\u043E\u0430\u0434\u0440\u0435\u0441\u0432\u0440\u0435\u043C\u0435\u043D\u043D\u043E\u0433\u043E\u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430 ";
-    const v8_global_context_property = "ws\u0441\u0441\u044B\u043B\u043A\u0438 \u0431\u0438\u0431\u043B\u0438\u043E\u0442\u0435\u043A\u0430\u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A \u0431\u0438\u0431\u043B\u0438\u043E\u0442\u0435\u043A\u0430\u043C\u0430\u043A\u0435\u0442\u043E\u0432\u043E\u0444\u043E\u0440\u043C\u043B\u0435\u043D\u0438\u044F\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0431\u0438\u0431\u043B\u0438\u043E\u0442\u0435\u043A\u0430\u0441\u0442\u0438\u043B\u0435\u0439 \u0431\u0438\u0437\u043D\u0435\u0441\u043F\u0440\u043E\u0446\u0435\u0441\u0441\u044B " + "\u0432\u043D\u0435\u0448\u043D\u0438\u0435\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0432\u043D\u0435\u0448\u043D\u0438\u0435\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438 \u0432\u043D\u0435\u0448\u043D\u0438\u0435\u043E\u0442\u0447\u0435\u0442\u044B \u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0435\u043F\u043E\u043A\u0443\u043F\u043A\u0438 \u0433\u043B\u0430\u0432\u043D\u044B\u0439\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441 \u0433\u043B\u0430\u0432\u043D\u044B\u0439\u0441\u0442\u0438\u043B\u044C " + "\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u044B \u0434\u043E\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u043C\u044B\u0435\u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u044F \u0436\u0443\u0440\u043D\u0430\u043B\u044B\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432 \u0437\u0430\u0434\u0430\u0447\u0438 \u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u044F\u043E\u0431\u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0438 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0440\u0430\u0431\u043E\u0447\u0435\u0439\u0434\u0430\u0442\u044B " + "\u0438\u0441\u0442\u043E\u0440\u0438\u044F\u0440\u0430\u0431\u043E\u0442\u044B\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u043A\u043E\u043D\u0441\u0442\u0430\u043D\u0442\u044B \u043A\u0440\u0438\u0442\u0435\u0440\u0438\u0438\u043E\u0442\u0431\u043E\u0440\u0430 \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0435 \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438 \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0440\u0435\u043A\u043B\u0430\u043C\u044B \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0430\u0434\u043E\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u043C\u044B\u0445\u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u0439 " + "\u043E\u0442\u0447\u0435\u0442\u044B \u043F\u0430\u043D\u0435\u043B\u044C\u0437\u0430\u0434\u0430\u0447\u043E\u0441 \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u0437\u0430\u043F\u0443\u0441\u043A\u0430 \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B\u0441\u0435\u0430\u043D\u0441\u0430 \u043F\u0435\u0440\u0435\u0447\u0438\u0441\u043B\u0435\u043D\u0438\u044F \u043F\u043B\u0430\u043D\u044B\u0432\u0438\u0434\u043E\u0432\u0440\u0430\u0441\u0447\u0435\u0442\u0430 \u043F\u043B\u0430\u043D\u044B\u0432\u0438\u0434\u043E\u0432\u0445\u0430\u0440\u0430\u043A\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043A " + "\u043F\u043B\u0430\u043D\u044B\u043E\u0431\u043C\u0435\u043D\u0430 \u043F\u043B\u0430\u043D\u044B\u0441\u0447\u0435\u0442\u043E\u0432 \u043F\u043E\u043B\u043D\u043E\u0442\u0435\u043A\u0441\u0442\u043E\u0432\u044B\u0439\u043F\u043E\u0438\u0441\u043A \u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0438\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u043E\u043D\u043D\u043E\u0439\u0431\u0430\u0437\u044B \u043F\u043E\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u0438 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430\u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0445\u043F\u043E\u043A\u0443\u043F\u043E\u043A " + "\u0440\u0430\u0431\u043E\u0447\u0430\u044F\u0434\u0430\u0442\u0430 \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F\u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438 \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u044B\u0431\u0443\u0445\u0433\u0430\u043B\u0442\u0435\u0440\u0438\u0438 \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u044B\u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u0438\u044F \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u044B\u0440\u0430\u0441\u0447\u0435\u0442\u0430 \u0440\u0435\u0433\u0438\u0441\u0442\u0440\u044B\u0441\u0432\u0435\u0434\u0435\u043D\u0438\u0439 " + "\u0440\u0435\u0433\u043B\u0430\u043C\u0435\u043D\u0442\u043D\u044B\u0435\u0437\u0430\u0434\u0430\u043D\u0438\u044F \u0441\u0435\u0440\u0438\u0430\u043B\u0438\u0437\u0430\u0442\u043E\u0440xdto \u0441\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A\u0438 \u0441\u0440\u0435\u0434\u0441\u0442\u0432\u0430\u0433\u0435\u043E\u043F\u043E\u0437\u0438\u0446\u0438\u043E\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u0441\u0440\u0435\u0434\u0441\u0442\u0432\u0430\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0438 \u0441\u0440\u0435\u0434\u0441\u0442\u0432\u0430\u043C\u0443\u043B\u044C\u0442\u0438\u043C\u0435\u0434\u0438\u0430 " + "\u0441\u0440\u0435\u0434\u0441\u0442\u0432\u0430\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u0440\u0435\u043A\u043B\u0430\u043C\u044B \u0441\u0440\u0435\u0434\u0441\u0442\u0432\u0430\u043F\u043E\u0447\u0442\u044B \u0441\u0440\u0435\u0434\u0441\u0442\u0432\u0430\u0442\u0435\u043B\u0435\u0444\u043E\u043D\u0438\u0438 \u0444\u0430\u0431\u0440\u0438\u043A\u0430xdto \u0444\u0430\u0439\u043B\u043E\u0432\u044B\u0435\u043F\u043E\u0442\u043E\u043A\u0438 \u0444\u043E\u043D\u043E\u0432\u044B\u0435\u0437\u0430\u0434\u0430\u043D\u0438\u044F \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A " + "\u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435\u0432\u0430\u0440\u0438\u0430\u043D\u0442\u043E\u0432\u043E\u0442\u0447\u0435\u0442\u043E\u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A\u0434\u0430\u043D\u043D\u044B\u0445\u0444\u043E\u0440\u043C \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435\u043E\u0431\u0449\u0438\u0445\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u0441\u043A\u0438\u0445\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A\u0434\u0438\u043D\u0430\u043C\u0438\u0447\u0435\u0441\u043A\u0438\u0445\u0441\u043F\u0438\u0441\u043A\u043E\u0432 " + "\u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u0441\u043A\u0438\u0445\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A\u043E\u0442\u0447\u0435\u0442\u043E\u0432 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435\u0441\u0438\u0441\u0442\u0435\u043C\u043D\u044B\u0445\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A ";
+    const v7_system_constants = "разделительстраниц разделительстрок символтабуляции ";
+    const v7_global_context_methods = "ansitooem oemtoansi ввестивидсубконто ввестиперечисление ввестипериод ввестиплансчетов выбранныйплансчетов " + "датагод датамесяц датачисло заголовоксистемы значениевстроку значениеизстроки каталогиб каталогпользователя " + "кодсимв конгода конецпериодаби конецрассчитанногопериодаби конецстандартногоинтервала конквартала конмесяца " + "коннедели лог лог10 максимальноеколичествосубконто названиеинтерфейса названиенабораправ назначитьвид " + "назначитьсчет найтиссылки началопериодаби началостандартногоинтервала начгода начквартала начмесяца " + "начнедели номерднягода номерднянедели номернеделигода обработкаожидания основнойжурналрасчетов " + "основнойплансчетов основнойязык очиститьокносообщений периодстр получитьвремята получитьдатута " + "получитьдокументта получитьзначенияотбора получитьпозициюта получитьпустоезначение получитьта " + "префиксавтонумерации пропись пустоезначение разм разобратьпозициюдокумента рассчитатьрегистрына " + "рассчитатьрегистрыпо симв создатьобъект статусвозврата стрколичествострок сформироватьпозициюдокумента " + "счетпокоду текущеевремя типзначения типзначениястр установитьтана установитьтапо фиксшаблон шаблон ";
+    const v8_global_context_methods = "acos asin atan base64значение base64строка cos exp log log10 pow sin sqrt tan xmlзначение xmlстрока " + "xmlтип xmlтипзнч активноеокно безопасныйрежим безопасныйрежимразделенияданных булево ввестидату ввестизначение " + "ввестистроку ввестичисло возможностьчтенияxml вопрос восстановитьзначение врег выгрузитьжурналрегистрации " + "выполнитьобработкуоповещения выполнитьпроверкуправдоступа вычислить год данныеформывзначение дата день деньгода " + "деньнедели добавитьмесяц заблокироватьданныедляредактирования заблокироватьработупользователя завершитьработусистемы " + "загрузитьвнешнююкомпоненту закрытьсправку записатьjson записатьxml записатьдатуjson записьжурналарегистрации " + "заполнитьзначениясвойств запроситьразрешениепользователя запуститьприложение запуститьсистему зафиксироватьтранзакцию " + "значениевданныеформы значениевстрокувнутр значениевфайл значениезаполнено значениеизстрокивнутр значениеизфайла " + "изxmlтипа импортмоделиxdto имякомпьютера имяпользователя инициализироватьпредопределенныеданные информацияобошибке " + "каталогбиблиотекимобильногоустройства каталогвременныхфайлов каталогдокументов каталогпрограммы кодироватьстроку " + "кодлокализацииинформационнойбазы кодсимвола командасистемы конецгода конецдня конецквартала конецмесяца конецминуты " + "конецнедели конецчаса конфигурациябазыданныхизмененадинамически конфигурацияизменена копироватьданныеформы " + "копироватьфайл краткоепредставлениеошибки лев макс местноевремя месяц мин минута монопольныйрежим найти " + "найтинедопустимыесимволыxml найтиокнопонавигационнойссылке найтипомеченныенаудаление найтипоссылкам найтифайлы " + "началогода началодня началоквартала началомесяца началоминуты началонедели началочаса начатьзапросразрешенияпользователя " + "начатьзапускприложения начатькопированиефайла начатьперемещениефайла начатьподключениевнешнейкомпоненты " + "начатьподключениерасширенияработыскриптографией начатьподключениерасширенияработысфайлами начатьпоискфайлов " + "начатьполучениекаталогавременныхфайлов начатьполучениекаталогадокументов начатьполучениерабочегокаталогаданныхпользователя " + "начатьполучениефайлов начатьпомещениефайла начатьпомещениефайлов начатьсозданиедвоичныхданныхизфайла начатьсозданиекаталога " + "начатьтранзакцию начатьудалениефайлов начатьустановкувнешнейкомпоненты начатьустановкурасширенияработыскриптографией " + "начатьустановкурасширенияработысфайлами неделягода необходимостьзавершениясоединения номерсеансаинформационнойбазы " + "номерсоединенияинформационнойбазы нрег нстр обновитьинтерфейс обновитьнумерациюобъектов обновитьповторноиспользуемыезначения " + "обработкапрерыванияпользователя объединитьфайлы окр описаниеошибки оповестить оповеститьобизменении " + "отключитьобработчикзапросанастроекклиенталицензирования отключитьобработчикожидания отключитьобработчикоповещения " + "открытьзначение открытьиндекссправки открытьсодержаниесправки открытьсправку открытьформу открытьформумодально " + "отменитьтранзакцию очиститьжурналрегистрации очиститьнастройкипользователя очиститьсообщения параметрыдоступа " + "перейтипонавигационнойссылке переместитьфайл подключитьвнешнююкомпоненту " + "подключитьобработчикзапросанастроекклиенталицензирования подключитьобработчикожидания подключитьобработчикоповещения " + "подключитьрасширениеработыскриптографией подключитьрасширениеработысфайлами подробноепредставлениеошибки " + "показатьвводдаты показатьвводзначения показатьвводстроки показатьвводчисла показатьвопрос показатьзначение " + "показатьинформациюобошибке показатьнакарте показатьоповещениепользователя показатьпредупреждение полноеимяпользователя " + "получитьcomобъект получитьxmlтип получитьадреспоместоположению получитьблокировкусеансов получитьвремязавершенияспящегосеанса " + "получитьвремязасыпанияпассивногосеанса получитьвремяожиданияблокировкиданных получитьданныевыбора " + "получитьдополнительныйпараметрклиенталицензирования получитьдопустимыекодылокализации получитьдопустимыечасовыепояса " + "получитьзаголовокклиентскогоприложения получитьзаголовоксистемы получитьзначенияотборажурналарегистрации " + "получитьидентификаторконфигурации получитьизвременногохранилища получитьимявременногофайла " + "получитьимяклиенталицензирования получитьинформациюэкрановклиента получитьиспользованиежурналарегистрации " + "получитьиспользованиесобытияжурналарегистрации получитькраткийзаголовокприложения получитьмакетоформления " + "получитьмаскувсефайлы получитьмаскувсефайлыклиента получитьмаскувсефайлысервера получитьместоположениепоадресу " + "получитьминимальнуюдлинупаролейпользователей получитьнавигационнуюссылку получитьнавигационнуюссылкуинформационнойбазы " + "получитьобновлениеконфигурациибазыданных получитьобновлениепредопределенныхданныхинформационнойбазы получитьобщиймакет " + "получитьобщуюформу получитьокна получитьоперативнуюотметкувремени получитьотключениебезопасногорежима " + "получитьпараметрыфункциональныхопцийинтерфейса получитьполноеимяпредопределенногозначения " + "получитьпредставлениянавигационныхссылок получитьпроверкусложностипаролейпользователей получитьразделительпути " + "получитьразделительпутиклиента получитьразделительпутисервера получитьсеансыинформационнойбазы " + "получитьскоростьклиентскогосоединения получитьсоединенияинформационнойбазы получитьсообщенияпользователю " + "получитьсоответствиеобъектаиформы получитьсоставстандартногоинтерфейсаodata получитьструктурухранениябазыданных " + "получитьтекущийсеансинформационнойбазы получитьфайл получитьфайлы получитьформу получитьфункциональнуюопцию " + "получитьфункциональнуюопциюинтерфейса получитьчасовойпоясинформационнойбазы пользователиос поместитьвовременноехранилище " + "поместитьфайл поместитьфайлы прав праводоступа предопределенноезначение представлениекодалокализации представлениепериода " + "представлениеправа представлениеприложения представлениесобытияжурналарегистрации представлениечасовогопояса предупреждение " + "прекратитьработусистемы привилегированныйрежим продолжитьвызов прочитатьjson прочитатьxml прочитатьдатуjson пустаястрока " + "рабочийкаталогданныхпользователя разблокироватьданныедляредактирования разделитьфайл разорватьсоединениесвнешнимисточникомданных " + "раскодироватьстроку рольдоступна секунда сигнал символ скопироватьжурналрегистрации смещениелетнеговремени " + "смещениестандартноговремени соединитьбуферыдвоичныхданных создатькаталог создатьфабрикуxdto сокрл сокрлп сокрп сообщить " + "состояние сохранитьзначение сохранитьнастройкипользователя сред стрдлина стрзаканчиваетсяна стрзаменить стрнайти стрначинаетсяс " + "строка строкасоединенияинформационнойбазы стрполучитьстроку стрразделить стрсоединить стрсравнить стрчисловхождений " + "стрчислострок стршаблон текущаядата текущаядатасеанса текущаяуниверсальнаядата текущаяуниверсальнаядатавмиллисекундах " + "текущийвариантинтерфейсаклиентскогоприложения текущийвариантосновногошрифтаклиентскогоприложения текущийкодлокализации " + "текущийрежимзапуска текущийязык текущийязыксистемы тип типзнч транзакцияактивна трег удалитьданныеинформационнойбазы " + "удалитьизвременногохранилища удалитьобъекты удалитьфайлы универсальноевремя установитьбезопасныйрежим " + "установитьбезопасныйрежимразделенияданных установитьблокировкусеансов установитьвнешнююкомпоненту " + "установитьвремязавершенияспящегосеанса установитьвремязасыпанияпассивногосеанса установитьвремяожиданияблокировкиданных " + "установитьзаголовокклиентскогоприложения установитьзаголовоксистемы установитьиспользованиежурналарегистрации " + "установитьиспользованиесобытияжурналарегистрации установитькраткийзаголовокприложения " + "установитьминимальнуюдлинупаролейпользователей установитьмонопольныйрежим установитьнастройкиклиенталицензирования " + "установитьобновлениепредопределенныхданныхинформационнойбазы установитьотключениебезопасногорежима " + "установитьпараметрыфункциональныхопцийинтерфейса установитьпривилегированныйрежим " + "установитьпроверкусложностипаролейпользователей установитьрасширениеработыскриптографией " + "установитьрасширениеработысфайлами установитьсоединениесвнешнимисточникомданных установитьсоответствиеобъектаиформы " + "установитьсоставстандартногоинтерфейсаodata установитьчасовойпоясинформационнойбазы установитьчасовойпояссеанса " + "формат цел час часовойпояс часовойпояссеанса число числопрописью этоадресвременногохранилища ";
+    const v8_global_context_property = "wsссылки библиотекакартинок библиотекамакетовоформлениякомпоновкиданных библиотекастилей бизнеспроцессы " + "внешниеисточникиданных внешниеобработки внешниеотчеты встроенныепокупки главныйинтерфейс главныйстиль " + "документы доставляемыеуведомления журналыдокументов задачи информацияобинтернетсоединении использованиерабочейдаты " + "историяработыпользователя константы критерииотбора метаданные обработки отображениерекламы отправкадоставляемыхуведомлений " + "отчеты панельзадачос параметрзапуска параметрысеанса перечисления планывидоврасчета планывидовхарактеристик " + "планыобмена планысчетов полнотекстовыйпоиск пользователиинформационнойбазы последовательности проверкавстроенныхпокупок " + "рабочаядата расширенияконфигурации регистрыбухгалтерии регистрынакопления регистрырасчета регистрысведений " + "регламентныезадания сериализаторxdto справочники средствагеопозиционирования средствакриптографии средствамультимедиа " + "средстваотображениярекламы средствапочты средствателефонии фабрикаxdto файловыепотоки фоновыезадания хранилищанастроек " + "хранилищевариантовотчетов хранилищенастроекданныхформ хранилищеобщихнастроек хранилищепользовательскихнастроекдинамическихсписков " + "хранилищепользовательскихнастроекотчетов хранилищесистемныхнастроек ";
     const BUILTIN = v7_system_constants + v7_global_context_methods + v8_global_context_methods + v8_global_context_property;
-    const v8_system_sets_of_values = "web\u0446\u0432\u0435\u0442\u0430 windows\u0446\u0432\u0435\u0442\u0430 windows\u0448\u0440\u0438\u0444\u0442\u044B \u0431\u0438\u0431\u043B\u0438\u043E\u0442\u0435\u043A\u0430\u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A \u0440\u0430\u043C\u043A\u0438\u0441\u0442\u0438\u043B\u044F \u0441\u0438\u043C\u0432\u043E\u043B\u044B \u0446\u0432\u0435\u0442\u0430\u0441\u0442\u0438\u043B\u044F \u0448\u0440\u0438\u0444\u0442\u044B\u0441\u0442\u0438\u043B\u044F ";
-    const v8_system_enums_interface = "\u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u043E\u0435\u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435\u0434\u0430\u043D\u043D\u044B\u0445\u0444\u043E\u0440\u043C\u044B\u0432\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u0430\u0432\u0442\u043E\u043D\u0443\u043C\u0435\u0440\u0430\u0446\u0438\u044F\u0432\u0444\u043E\u0440\u043C\u0435 \u0430\u0432\u0442\u043E\u0440\u0430\u0437\u0434\u0432\u0438\u0436\u0435\u043D\u0438\u0435\u0441\u0435\u0440\u0438\u0439 " + "\u0430\u043D\u0438\u043C\u0430\u0446\u0438\u044F\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u0432\u044B\u0440\u0430\u0432\u043D\u0438\u0432\u0430\u043D\u0438\u044F\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u043E\u0432\u0438\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u043E\u0432 \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u0443\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F\u0432\u044B\u0441\u043E\u0442\u043E\u0439\u0442\u0430\u0431\u043B\u0438\u0446\u044B " + "\u0432\u0435\u0440\u0442\u0438\u043A\u0430\u043B\u044C\u043D\u0430\u044F\u043F\u0440\u043E\u043A\u0440\u0443\u0442\u043A\u0430\u0444\u043E\u0440\u043C\u044B \u0432\u0435\u0440\u0442\u0438\u043A\u0430\u043B\u044C\u043D\u043E\u0435\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u0432\u0435\u0440\u0442\u0438\u043A\u0430\u043B\u044C\u043D\u043E\u0435\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430 \u0432\u0438\u0434\u0433\u0440\u0443\u043F\u043F\u044B\u0444\u043E\u0440\u043C\u044B " + "\u0432\u0438\u0434\u0434\u0435\u043A\u043E\u0440\u0430\u0446\u0438\u0438\u0444\u043E\u0440\u043C\u044B \u0432\u0438\u0434\u0434\u043E\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0444\u043E\u0440\u043C\u044B \u0432\u0438\u0434\u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F\u0434\u0430\u043D\u043D\u044B\u0445 \u0432\u0438\u0434\u043A\u043D\u043E\u043F\u043A\u0438\u0444\u043E\u0440\u043C\u044B \u0432\u0438\u0434\u043F\u0435\u0440\u0435\u043A\u043B\u044E\u0447\u0430\u0442\u0435\u043B\u044F " + "\u0432\u0438\u0434\u043F\u043E\u0434\u043F\u0438\u0441\u0435\u0439\u043A\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u0435 \u0432\u0438\u0434\u043F\u043E\u043B\u044F\u0444\u043E\u0440\u043C\u044B \u0432\u0438\u0434\u0444\u043B\u0430\u0436\u043A\u0430 \u0432\u043B\u0438\u044F\u043D\u0438\u0435\u0440\u0430\u0437\u043C\u0435\u0440\u0430\u043D\u0430\u043F\u0443\u0437\u044B\u0440\u0435\u043A\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0433\u043E\u0440\u0438\u0437\u043E\u043D\u0442\u0430\u043B\u044C\u043D\u043E\u0435\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435 " + "\u0433\u043E\u0440\u0438\u0437\u043E\u043D\u0442\u0430\u043B\u044C\u043D\u043E\u0435\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430 \u0433\u0440\u0443\u043F\u043F\u0438\u0440\u043E\u0432\u043A\u0430\u043A\u043E\u043B\u043E\u043D\u043E\u043A \u0433\u0440\u0443\u043F\u043F\u0438\u0440\u043E\u0432\u043A\u0430\u043F\u043E\u0434\u0447\u0438\u043D\u0435\u043D\u043D\u044B\u0445\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u043E\u0432\u0444\u043E\u0440\u043C\u044B " + "\u0433\u0440\u0443\u043F\u043F\u044B\u0438\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u044B \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435\u043F\u0435\u0440\u0435\u0442\u0430\u0441\u043A\u0438\u0432\u0430\u043D\u0438\u044F \u0434\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u044B\u0439\u0440\u0435\u0436\u0438\u043C\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F \u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u044B\u0435\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F\u043F\u0435\u0440\u0435\u0442\u0430\u0441\u043A\u0438\u0432\u0430\u043D\u0438\u044F " + "\u0438\u043D\u0442\u0435\u0440\u0432\u0430\u043B\u043C\u0435\u0436\u0434\u0443\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u043C\u0438\u0444\u043E\u0440\u043C\u044B \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0432\u044B\u0432\u043E\u0434\u0430 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u043F\u043E\u043B\u043E\u0441\u044B\u043F\u0440\u043E\u043A\u0440\u0443\u0442\u043A\u0438 " + "\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u043C\u043E\u0435\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0442\u043E\u0447\u043A\u0438\u0431\u0438\u0440\u0436\u0435\u0432\u043E\u0439\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0438\u0441\u0442\u043E\u0440\u0438\u044F\u0432\u044B\u0431\u043E\u0440\u0430\u043F\u0440\u0438\u0432\u0432\u043E\u0434\u0435 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439\u043E\u0441\u0438\u0442\u043E\u0447\u0435\u043A\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F\u0440\u0430\u0437\u043C\u0435\u0440\u0430\u043F\u0443\u0437\u044B\u0440\u044C\u043A\u0430\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044F\u0433\u0440\u0443\u043F\u043F\u044B\u043A\u043E\u043C\u0430\u043D\u0434 \u043C\u0430\u043A\u0441\u0438\u043C\u0443\u043C\u0441\u0435\u0440\u0438\u0439 \u043D\u0430\u0447\u0430\u043B\u044C\u043D\u043E\u0435\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0434\u0435\u0440\u0435\u0432\u0430 " + "\u043D\u0430\u0447\u0430\u043B\u044C\u043D\u043E\u0435\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0441\u043F\u0438\u0441\u043A\u0430 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435\u0442\u0435\u043A\u0441\u0442\u0430\u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F \u043E\u0440\u0438\u0435\u043D\u0442\u0430\u0446\u0438\u044F\u0434\u0435\u043D\u0434\u0440\u043E\u0433\u0440\u0430\u043C\u043C\u044B \u043E\u0440\u0438\u0435\u043D\u0442\u0430\u0446\u0438\u044F\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u043E\u0440\u0438\u0435\u043D\u0442\u0430\u0446\u0438\u044F\u043C\u0435\u0442\u043E\u043A\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u043E\u0440\u0438\u0435\u043D\u0442\u0430\u0446\u0438\u044F\u043C\u0435\u0442\u043E\u043A\u0441\u0432\u043E\u0434\u043D\u043E\u0439\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u043E\u0440\u0438\u0435\u043D\u0442\u0430\u0446\u0438\u044F\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0444\u043E\u0440\u043C\u044B \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0432\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u0435 " + "\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0432\u043B\u0435\u0433\u0435\u043D\u0434\u0435\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0433\u0440\u0443\u043F\u043F\u044B\u043A\u043D\u043E\u043F\u043E\u043A \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0430\u0448\u043A\u0430\u043B\u044B\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439\u0441\u0432\u043E\u0434\u043D\u043E\u0439\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F\u0438\u0437\u043C\u0435\u0440\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0439\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0438\u043D\u0442\u0435\u0440\u0432\u0430\u043B\u0430\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B\u0433\u0430\u043D\u0442\u0430 \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043A\u043D\u043E\u043F\u043A\u0438 \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043A\u043D\u043E\u043F\u043A\u0438\u0432\u044B\u0431\u043E\u0440\u0430 \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043E\u0431\u0441\u0443\u0436\u0434\u0435\u043D\u0438\u0439\u0444\u043E\u0440\u043C\u044B " + "\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043E\u0431\u044B\u0447\u043D\u043E\u0439\u0433\u0440\u0443\u043F\u043F\u044B \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043E\u0442\u0440\u0438\u0446\u0430\u0442\u0435\u043B\u044C\u043D\u044B\u0445\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439\u043F\u0443\u0437\u044B\u0440\u044C\u043A\u043E\u0432\u043E\u0439\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043F\u0430\u043D\u0435\u043B\u0438\u043F\u043E\u0438\u0441\u043A\u0430 " + "\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0438 \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043F\u0440\u0435\u0434\u0443\u043F\u0440\u0435\u0436\u0434\u0435\u043D\u0438\u044F\u043F\u0440\u0438\u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0438 \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0440\u0430\u0437\u043C\u0435\u0442\u043A\u0438\u043F\u043E\u043B\u043E\u0441\u044B\u0440\u0435\u0433\u0443\u043B\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F " + "\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0444\u043E\u0440\u043C\u044B \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0442\u0430\u0431\u043B\u0438\u0446\u044B \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0442\u0435\u043A\u0441\u0442\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B\u0433\u0430\u043D\u0442\u0430 " + "\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0443\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F\u043E\u0431\u044B\u0447\u043D\u043E\u0439\u0433\u0440\u0443\u043F\u043F\u044B \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0444\u0438\u0433\u0443\u0440\u044B\u043A\u043D\u043E\u043F\u043A\u0438 \u043F\u0430\u043B\u0438\u0442\u0440\u0430\u0446\u0432\u0435\u0442\u043E\u0432\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u043F\u043E\u0432\u0435\u0434\u0435\u043D\u0438\u0435\u043E\u0431\u044B\u0447\u043D\u043E\u0439\u0433\u0440\u0443\u043F\u043F\u044B " + "\u043F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u0430\u043C\u0430\u0441\u0448\u0442\u0430\u0431\u0430\u0434\u0435\u043D\u0434\u0440\u043E\u0433\u0440\u0430\u043C\u043C\u044B \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u0430\u043C\u0430\u0441\u0448\u0442\u0430\u0431\u0430\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B\u0433\u0430\u043D\u0442\u0430 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u043A\u0430\u043C\u0430\u0441\u0448\u0442\u0430\u0431\u0430\u0441\u0432\u043E\u0434\u043D\u043E\u0439\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u043F\u043E\u0438\u0441\u043A\u0432\u0442\u0430\u0431\u043B\u0438\u0446\u0435\u043F\u0440\u0438\u0432\u0432\u043E\u0434\u0435 \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0430\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0444\u043E\u0440\u043C\u044B \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438\u043A\u043D\u043E\u043F\u043A\u0438\u0444\u043E\u0440\u043C\u044B " + "\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043A\u043E\u043C\u0430\u043D\u0434\u043D\u043E\u0439\u043F\u0430\u043D\u0435\u043B\u0438\u0444\u043E\u0440\u043C\u044B \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043A\u043E\u043C\u0430\u043D\u0434\u043D\u043E\u0439\u043F\u0430\u043D\u0435\u043B\u0438\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0444\u043E\u0440\u043C\u044B " + "\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043E\u043F\u043E\u0440\u043D\u043E\u0439\u0442\u043E\u0447\u043A\u0438\u043E\u0442\u0440\u0438\u0441\u043E\u0432\u043A\u0438 \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043F\u043E\u0434\u043F\u0438\u0441\u0435\u0439\u043A\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u0435 \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043F\u043E\u0434\u043F\u0438\u0441\u0435\u0439\u0448\u043A\u0430\u043B\u044B\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439\u0438\u0437\u043C\u0435\u0440\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0439\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430 \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0441\u0442\u0440\u043E\u043A\u0438\u043F\u043E\u0438\u0441\u043A\u0430 \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0442\u0435\u043A\u0441\u0442\u0430\u0441\u043E\u0435\u0434\u0438\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0439\u043B\u0438\u043D\u0438\u0438 \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0443\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F\u043F\u043E\u0438\u0441\u043A\u043E\u043C " + "\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0448\u043A\u0430\u043B\u044B\u0432\u0440\u0435\u043C\u0435\u043D\u0438 \u043F\u043E\u0440\u044F\u0434\u043E\u043A\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u0442\u043E\u0447\u0435\u043A\u0433\u043E\u0440\u0438\u0437\u043E\u043D\u0442\u0430\u043B\u044C\u043D\u043E\u0439\u0433\u0438\u0441\u0442\u043E\u0433\u0440\u0430\u043C\u043C\u044B \u043F\u043E\u0440\u044F\u0434\u043E\u043A\u0441\u0435\u0440\u0438\u0439\u0432\u043B\u0435\u0433\u0435\u043D\u0434\u0435\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u0440\u0430\u0437\u043C\u0435\u0440\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 \u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0430\u0448\u043A\u0430\u043B\u044B\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0440\u0430\u0441\u0442\u044F\u0433\u0438\u0432\u0430\u043D\u0438\u0435\u043F\u043E\u0432\u0435\u0440\u0442\u0438\u043A\u0430\u043B\u0438\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B\u0433\u0430\u043D\u0442\u0430 " + "\u0440\u0435\u0436\u0438\u043C\u0430\u0432\u0442\u043E\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F \u0440\u0435\u0436\u0438\u043C\u0432\u0432\u043E\u0434\u0430\u0441\u0442\u0440\u043E\u043A\u0442\u0430\u0431\u043B\u0438\u0446\u044B \u0440\u0435\u0436\u0438\u043C\u0432\u044B\u0431\u043E\u0440\u0430\u043D\u0435\u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u043D\u043E\u0433\u043E \u0440\u0435\u0436\u0438\u043C\u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u044F\u0434\u0430\u0442\u044B " + "\u0440\u0435\u0436\u0438\u043C\u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u044F\u0441\u0442\u0440\u043E\u043A\u0438\u0442\u0430\u0431\u043B\u0438\u0446\u044B \u0440\u0435\u0436\u0438\u043C\u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u044F\u0442\u0430\u0431\u043B\u0438\u0446\u044B \u0440\u0435\u0436\u0438\u043C\u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F\u0440\u0430\u0437\u043C\u0435\u0440\u0430 \u0440\u0435\u0436\u0438\u043C\u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u044F\u0441\u0432\u044F\u0437\u0430\u043D\u043D\u043E\u0433\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F " + "\u0440\u0435\u0436\u0438\u043C\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u0434\u0438\u0430\u043B\u043E\u0433\u0430\u043F\u0435\u0447\u0430\u0442\u0438 \u0440\u0435\u0436\u0438\u043C\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u0430\u043A\u043E\u043C\u0430\u043D\u0434\u044B \u0440\u0435\u0436\u0438\u043C\u043C\u0430\u0441\u0448\u0442\u0430\u0431\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F\u043F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0430 " + "\u0440\u0435\u0436\u0438\u043C\u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0433\u043E\u043E\u043A\u043D\u0430\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0440\u0435\u0436\u0438\u043C\u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F\u043E\u043A\u043D\u0430\u0444\u043E\u0440\u043C\u044B \u0440\u0435\u0436\u0438\u043C\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u044F " + "\u0440\u0435\u0436\u0438\u043C\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u0440\u0435\u0436\u0438\u043C\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439\u0441\u0435\u0440\u0438\u0438 \u0440\u0435\u0436\u0438\u043C\u043E\u0442\u0440\u0438\u0441\u043E\u0432\u043A\u0438\u0441\u0435\u0442\u043A\u0438\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B " + "\u0440\u0435\u0436\u0438\u043C\u043F\u043E\u043B\u0443\u043F\u0440\u043E\u0437\u0440\u0430\u0447\u043D\u043E\u0441\u0442\u0438\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0440\u0435\u0436\u0438\u043C\u043F\u0440\u043E\u0431\u0435\u043B\u043E\u0432\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0440\u0435\u0436\u0438\u043C\u0440\u0430\u0437\u043C\u0435\u0449\u0435\u043D\u0438\u044F\u043D\u0430\u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u0440\u0435\u0436\u0438\u043C\u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F\u043A\u043E\u043B\u043E\u043D\u043A\u0438 " + "\u0440\u0435\u0436\u0438\u043C\u0441\u0433\u043B\u0430\u0436\u0438\u0432\u0430\u043D\u0438\u044F\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0440\u0435\u0436\u0438\u043C\u0441\u0433\u043B\u0430\u0436\u0438\u0432\u0430\u043D\u0438\u044F\u0438\u043D\u0434\u0438\u043A\u0430\u0442\u043E\u0440\u0430 \u0440\u0435\u0436\u0438\u043C\u0441\u043F\u0438\u0441\u043A\u0430\u0437\u0430\u0434\u0430\u0447 \u0441\u043A\u0432\u043E\u0437\u043D\u043E\u0435\u0432\u044B\u0440\u0430\u0432\u043D\u0438\u0432\u0430\u043D\u0438\u0435 " + "\u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u0435\u0434\u0430\u043D\u043D\u044B\u0445\u0444\u043E\u0440\u043C\u044B\u0432\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445 \u0441\u043F\u043E\u0441\u043E\u0431\u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F\u0442\u0435\u043A\u0441\u0442\u0430\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0430\u0448\u043A\u0430\u043B\u044B\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u0441\u043F\u043E\u0441\u043E\u0431\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u0438\u044F\u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0438\u0432\u0430\u044E\u0449\u0435\u0433\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u0430\u044F\u0433\u0440\u0443\u043F\u043F\u0430\u043A\u043E\u043C\u0430\u043D\u0434 \u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0435\u043E\u0444\u043E\u0440\u043C\u043B\u0435\u043D\u0438\u0435 " + "\u0441\u0442\u0430\u0442\u0443\u0441\u043E\u043F\u043E\u0432\u0435\u0449\u0435\u043D\u0438\u044F\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044F \u0441\u0442\u0438\u043B\u044C\u0441\u0442\u0440\u0435\u043B\u043A\u0438 \u0442\u0438\u043F\u0430\u043F\u043F\u0440\u043E\u043A\u0441\u0438\u043C\u0430\u0446\u0438\u0438\u043B\u0438\u043D\u0438\u0438\u0442\u0440\u0435\u043D\u0434\u0430\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0442\u0438\u043F\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u0442\u0438\u043F\u0435\u0434\u0438\u043D\u0438\u0446\u044B\u0448\u043A\u0430\u043B\u044B\u0432\u0440\u0435\u043C\u0435\u043D\u0438 \u0442\u0438\u043F\u0438\u043C\u043F\u043E\u0440\u0442\u0430\u0441\u0435\u0440\u0438\u0439\u0441\u043B\u043E\u044F\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u0442\u0438\u043F\u043B\u0438\u043D\u0438\u0438\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u0442\u0438\u043F\u043B\u0438\u043D\u0438\u0438\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u0442\u0438\u043F\u043C\u0430\u0440\u043A\u0435\u0440\u0430\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u0442\u0438\u043F\u043C\u0430\u0440\u043A\u0435\u0440\u0430\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0442\u0438\u043F\u043E\u0431\u043B\u0430\u0441\u0442\u0438\u043E\u0444\u043E\u0440\u043C\u043B\u0435\u043D\u0438\u044F " + "\u0442\u0438\u043F\u043E\u0440\u0433\u0430\u043D\u0438\u0437\u0430\u0446\u0438\u0438\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u0434\u0430\u043D\u043D\u044B\u0445\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u0442\u0438\u043F\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u0441\u0435\u0440\u0438\u0438\u0441\u043B\u043E\u044F\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B " + "\u0442\u0438\u043F\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u0442\u043E\u0447\u0435\u0447\u043D\u043E\u0433\u043E\u043E\u0431\u044A\u0435\u043A\u0442\u0430\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u0442\u0438\u043F\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u0448\u043A\u0430\u043B\u044B\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u043B\u0435\u0433\u0435\u043D\u0434\u044B\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B " + "\u0442\u0438\u043F\u043F\u043E\u0438\u0441\u043A\u0430\u043E\u0431\u044A\u0435\u043A\u0442\u043E\u0432\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u0442\u0438\u043F\u043F\u0440\u043E\u0435\u043A\u0446\u0438\u0438\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u0442\u0438\u043F\u0440\u0430\u0437\u043C\u0435\u0449\u0435\u043D\u0438\u044F\u0438\u0437\u043C\u0435\u0440\u0435\u043D\u0438\u0439 " + "\u0442\u0438\u043F\u0440\u0430\u0437\u043C\u0435\u0449\u0435\u043D\u0438\u044F\u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u043E\u0432\u0438\u0437\u043C\u0435\u0440\u0435\u043D\u0438\u0439 \u0442\u0438\u043F\u0440\u0430\u043C\u043A\u0438\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0443\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F \u0442\u0438\u043F\u0441\u0432\u043E\u0434\u043D\u043E\u0439\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u0442\u0438\u043F\u0441\u0432\u044F\u0437\u0438\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B\u0433\u0430\u043D\u0442\u0430 \u0442\u0438\u043F\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439\u043F\u043E\u0441\u0435\u0440\u0438\u044F\u043C\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0442\u0438\u043F\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F\u0442\u043E\u0447\u0435\u043A\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u0442\u0438\u043F\u0441\u043E\u0435\u0434\u0438\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0439\u043B\u0438\u043D\u0438\u0438 \u0442\u0438\u043F\u0441\u0442\u043E\u0440\u043E\u043D\u044B\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u0442\u0438\u043F\u0444\u043E\u0440\u043C\u044B\u043E\u0442\u0447\u0435\u0442\u0430 \u0442\u0438\u043F\u0448\u043A\u0430\u043B\u044B\u0440\u0430\u0434\u0430\u0440\u043D\u043E\u0439\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B " + "\u0444\u0430\u043A\u0442\u043E\u0440\u043B\u0438\u043D\u0438\u0438\u0442\u0440\u0435\u043D\u0434\u0430\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B \u0444\u0438\u0433\u0443\u0440\u0430\u043A\u043D\u043E\u043F\u043A\u0438 \u0444\u0438\u0433\u0443\u0440\u044B\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u043E\u0439\u0441\u0445\u0435\u043C\u044B \u0444\u0438\u043A\u0441\u0430\u0446\u0438\u044F\u0432\u0442\u0430\u0431\u043B\u0438\u0446\u0435 \u0444\u043E\u0440\u043C\u0430\u0442\u0434\u043D\u044F\u0448\u043A\u0430\u043B\u044B\u0432\u0440\u0435\u043C\u0435\u043D\u0438 " + "\u0444\u043E\u0440\u043C\u0430\u0442\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 \u0448\u0438\u0440\u0438\u043D\u0430\u043F\u043E\u0434\u0447\u0438\u043D\u0435\u043D\u043D\u044B\u0445\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u043E\u0432\u0444\u043E\u0440\u043C\u044B ";
-    const v8_system_enums_objects_properties = "\u0432\u0438\u0434\u0434\u0432\u0438\u0436\u0435\u043D\u0438\u044F\u0431\u0443\u0445\u0433\u0430\u043B\u0442\u0435\u0440\u0438\u0438 \u0432\u0438\u0434\u0434\u0432\u0438\u0436\u0435\u043D\u0438\u044F\u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u0438\u044F \u0432\u0438\u0434\u043F\u0435\u0440\u0438\u043E\u0434\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0440\u0430\u0441\u0447\u0435\u0442\u0430 \u0432\u0438\u0434\u0441\u0447\u0435\u0442\u0430 \u0432\u0438\u0434\u0442\u043E\u0447\u043A\u0438\u043C\u0430\u0440\u0448\u0440\u0443\u0442\u0430\u0431\u0438\u0437\u043D\u0435\u0441\u043F\u0440\u043E\u0446\u0435\u0441\u0441\u0430 " + "\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0430\u0433\u0440\u0435\u0433\u0430\u0442\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u0438\u044F \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0433\u0440\u0443\u043F\u043F\u0438\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u043E\u0432 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0440\u0435\u0436\u0438\u043C\u0430\u043F\u0440\u043E\u0432\u0435\u0434\u0435\u043D\u0438\u044F " + "\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0441\u0440\u0435\u0437\u0430 \u043F\u0435\u0440\u0438\u043E\u0434\u0438\u0447\u043D\u043E\u0441\u0442\u044C\u0430\u0433\u0440\u0435\u0433\u0430\u0442\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u0438\u044F \u0440\u0435\u0436\u0438\u043C\u0430\u0432\u0442\u043E\u0432\u0440\u0435\u043C\u044F \u0440\u0435\u0436\u0438\u043C\u0437\u0430\u043F\u0438\u0441\u0438\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0440\u0435\u0436\u0438\u043C\u043F\u0440\u043E\u0432\u0435\u0434\u0435\u043D\u0438\u044F\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 ";
-    const v8_system_enums_exchange_plans = "\u0430\u0432\u0442\u043E\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u044F\u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439 \u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u044B\u0439\u043D\u043E\u043C\u0435\u0440\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u043E\u0442\u043F\u0440\u0430\u0432\u043A\u0430\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u0435\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445 ";
-    const v8_system_enums_tabular_document = "\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u043A\u0438\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u043E\u0440\u0438\u0435\u043D\u0442\u0430\u0446\u0438\u044F\u0441\u0442\u0440\u0430\u043D\u0438\u0446\u044B \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0438\u0442\u043E\u0433\u043E\u0432\u043A\u043E\u043B\u043E\u043D\u043E\u043A\u0441\u0432\u043E\u0434\u043D\u043E\u0439\u0442\u0430\u0431\u043B\u0438\u0446\u044B " + "\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0438\u0442\u043E\u0433\u043E\u0432\u0441\u0442\u0440\u043E\u043A\u0441\u0432\u043E\u0434\u043D\u043E\u0439\u0442\u0430\u0431\u043B\u0438\u0446\u044B \u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0442\u0435\u043A\u0441\u0442\u0430\u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 \u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0430\u0433\u0440\u0443\u043F\u043F\u0438\u0440\u043E\u0432\u043A\u0438\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 " + "\u0441\u043F\u043E\u0441\u043E\u0431\u0447\u0442\u0435\u043D\u0438\u044F\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0442\u0438\u043F\u0434\u0432\u0443\u0441\u0442\u043E\u0440\u043E\u043D\u043D\u0435\u0439\u043F\u0435\u0447\u0430\u0442\u0438 \u0442\u0438\u043F\u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F\u043E\u0431\u043B\u0430\u0441\u0442\u0438\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 " + "\u0442\u0438\u043F\u043A\u0443\u0440\u0441\u043E\u0440\u043E\u0432\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0442\u0438\u043F\u043B\u0438\u043D\u0438\u0438\u0440\u0438\u0441\u0443\u043D\u043A\u0430\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0442\u0438\u043F\u043B\u0438\u043D\u0438\u0438\u044F\u0447\u0435\u0439\u043A\u0438\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 " + "\u0442\u0438\u043F\u043D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F\u043F\u0435\u0440\u0435\u0445\u043E\u0434\u0430\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0442\u0438\u043F\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u0432\u044B\u0434\u0435\u043B\u0435\u043D\u0438\u044F\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0442\u0438\u043F\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u043B\u0438\u043D\u0438\u0439\u0441\u0432\u043E\u0434\u043D\u043E\u0439\u0442\u0430\u0431\u043B\u0438\u0446\u044B " + "\u0442\u0438\u043F\u0440\u0430\u0437\u043C\u0435\u0449\u0435\u043D\u0438\u044F\u0442\u0435\u043A\u0441\u0442\u0430\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0442\u0438\u043F\u0440\u0438\u0441\u0443\u043D\u043A\u0430\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0442\u0438\u043F\u0441\u043C\u0435\u0449\u0435\u043D\u0438\u044F\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 " + "\u0442\u0438\u043F\u0443\u0437\u043E\u0440\u0430\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0442\u0438\u043F\u0444\u0430\u0439\u043B\u0430\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0442\u043E\u0447\u043D\u043E\u0441\u0442\u044C\u043F\u0435\u0447\u0430\u0442\u0438 \u0447\u0435\u0440\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u0435\u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u044F\u0441\u0442\u0440\u0430\u043D\u0438\u0446 ";
-    const v8_system_enums_sheduler = "\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u0432\u0440\u0435\u043C\u0435\u043D\u0438\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u043E\u0432\u043F\u043B\u0430\u043D\u0438\u0440\u043E\u0432\u0449\u0438\u043A\u0430 ";
-    const v8_system_enums_formatted_document = "\u0442\u0438\u043F\u0444\u0430\u0439\u043B\u0430\u0444\u043E\u0440\u043C\u0430\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E\u0433\u043E\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 ";
-    const v8_system_enums_query = "\u043E\u0431\u0445\u043E\u0434\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430\u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u0442\u0438\u043F\u0437\u0430\u043F\u0438\u0441\u0438\u0437\u0430\u043F\u0440\u043E\u0441\u0430 ";
-    const v8_system_enums_report_builder = "\u0432\u0438\u0434\u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F\u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u043A\u0438\u043F\u043E\u0441\u0442\u0440\u043E\u0438\u0442\u0435\u043B\u044F\u043E\u0442\u0447\u0435\u0442\u0430 \u0442\u0438\u043F\u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u0438\u044F\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0439 \u0442\u0438\u043F\u0438\u0437\u043C\u0435\u0440\u0435\u043D\u0438\u044F\u043F\u043E\u0441\u0442\u0440\u043E\u0438\u0442\u0435\u043B\u044F\u043E\u0442\u0447\u0435\u0442\u0430 \u0442\u0438\u043F\u0440\u0430\u0437\u043C\u0435\u0449\u0435\u043D\u0438\u044F\u0438\u0442\u043E\u0433\u043E\u0432 ";
-    const v8_system_enums_files = "\u0434\u043E\u0441\u0442\u0443\u043F\u043A\u0444\u0430\u0439\u043B\u0443 \u0440\u0435\u0436\u0438\u043C\u0434\u0438\u0430\u043B\u043E\u0433\u0430\u0432\u044B\u0431\u043E\u0440\u0430\u0444\u0430\u0439\u043B\u0430 \u0440\u0435\u0436\u0438\u043C\u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F\u0444\u0430\u0439\u043B\u0430 ";
-    const v8_system_enums_query_builder = "\u0442\u0438\u043F\u0438\u0437\u043C\u0435\u0440\u0435\u043D\u0438\u044F\u043F\u043E\u0441\u0442\u0440\u043E\u0438\u0442\u0435\u043B\u044F\u0437\u0430\u043F\u0440\u043E\u0441\u0430 ";
-    const v8_system_enums_data_analysis = "\u0432\u0438\u0434\u0434\u0430\u043D\u043D\u044B\u0445\u0430\u043D\u0430\u043B\u0438\u0437\u0430 \u043C\u0435\u0442\u043E\u0434\u043A\u043B\u0430\u0441\u0442\u0435\u0440\u0438\u0437\u0430\u0446\u0438\u0438 \u0442\u0438\u043F\u0435\u0434\u0438\u043D\u0438\u0446\u044B\u0438\u043D\u0442\u0435\u0440\u0432\u0430\u043B\u0430\u0432\u0440\u0435\u043C\u0435\u043D\u0438\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F\u0442\u0430\u0431\u043B\u0438\u0446\u044B\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0442\u0438\u043F\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u0447\u0438\u0441\u043B\u043E\u0432\u044B\u0445\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u0434\u0430\u043D\u043D\u044B\u0445\u043F\u043E\u0438\u0441\u043A\u0430\u0430\u0441\u0441\u043E\u0446\u0438\u0430\u0446\u0438\u0439 \u0442\u0438\u043F\u043A\u043E\u043B\u043E\u043D\u043A\u0438\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445\u0434\u0435\u0440\u0435\u0432\u043E\u0440\u0435\u0448\u0435\u043D\u0438\u0439 " + "\u0442\u0438\u043F\u043A\u043E\u043B\u043E\u043D\u043A\u0438\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445\u043A\u043B\u0430\u0441\u0442\u0435\u0440\u0438\u0437\u0430\u0446\u0438\u044F \u0442\u0438\u043F\u043A\u043E\u043B\u043E\u043D\u043A\u0438\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445\u043E\u0431\u0449\u0430\u044F\u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0430 \u0442\u0438\u043F\u043A\u043E\u043B\u043E\u043D\u043A\u0438\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445\u043F\u043E\u0438\u0441\u043A\u0430\u0441\u0441\u043E\u0446\u0438\u0430\u0446\u0438\u0439 " + "\u0442\u0438\u043F\u043A\u043E\u043B\u043E\u043D\u043A\u0438\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445\u043F\u043E\u0438\u0441\u043A\u043F\u043E\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u0435\u0439 \u0442\u0438\u043F\u043A\u043E\u043B\u043E\u043D\u043A\u0438\u043C\u043E\u0434\u0435\u043B\u0438\u043F\u0440\u043E\u0433\u043D\u043E\u0437\u0430 \u0442\u0438\u043F\u043C\u0435\u0440\u044B\u0440\u0430\u0441\u0441\u0442\u043E\u044F\u043D\u0438\u044F\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0442\u0438\u043F\u043E\u0442\u0441\u0435\u0447\u0435\u043D\u0438\u044F\u043F\u0440\u0430\u0432\u0438\u043B\u0430\u0441\u0441\u043E\u0446\u0438\u0430\u0446\u0438\u0438 \u0442\u0438\u043F\u043F\u043E\u043B\u044F\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u0438\u0437\u0430\u0446\u0438\u0438\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0443\u043F\u043E\u0440\u044F\u0434\u043E\u0447\u0438\u0432\u0430\u043D\u0438\u044F\u043F\u0440\u0430\u0432\u0438\u043B\u0430\u0441\u0441\u043E\u0446\u0438\u0430\u0446\u0438\u0438\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0442\u0438\u043F\u0443\u043F\u043E\u0440\u044F\u0434\u043E\u0447\u0438\u0432\u0430\u043D\u0438\u044F\u0448\u0430\u0431\u043B\u043E\u043D\u043E\u0432\u043F\u043E\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u0435\u0439\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0443\u043F\u0440\u043E\u0449\u0435\u043D\u0438\u044F\u0434\u0435\u0440\u0435\u0432\u0430\u0440\u0435\u0448\u0435\u043D\u0438\u0439 ";
-    const v8_system_enums_xml_json_xs_dom_xdto_ws = "ws\u043D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u0430 \u0432\u0430\u0440\u0438\u0430\u043D\u0442xpathxs \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u0437\u0430\u043F\u0438\u0441\u0438\u0434\u0430\u0442\u044Bjson \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u043F\u0440\u043E\u0441\u0442\u043E\u0433\u043E\u0442\u0438\u043F\u0430xs \u0432\u0438\u0434\u0433\u0440\u0443\u043F\u043F\u044B\u043C\u043E\u0434\u0435\u043B\u0438xs \u0432\u0438\u0434\u0444\u0430\u0441\u0435\u0442\u0430xdto " + "\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435\u043F\u043E\u0441\u0442\u0440\u043E\u0438\u0442\u0435\u043B\u044Fdom \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043D\u043E\u0441\u0442\u044C\u043F\u0440\u043E\u0441\u0442\u043E\u0433\u043E\u0442\u0438\u043F\u0430xs \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043D\u043E\u0441\u0442\u044C\u0441\u043E\u0441\u0442\u0430\u0432\u043D\u043E\u0433\u043E\u0442\u0438\u043F\u0430xs \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043D\u043D\u043E\u0441\u0442\u044C\u0441\u0445\u0435\u043C\u044Bxs \u0437\u0430\u043F\u0440\u0435\u0449\u0435\u043D\u043D\u044B\u0435\u043F\u043E\u0434\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0438xs " + "\u0438\u0441\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F\u0433\u0440\u0443\u043F\u043F\u043F\u043E\u0434\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0438xs \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044F\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u0430\u0442\u0440\u0438\u0431\u0443\u0442\u0430xs \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044F\u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F\u0438\u0434\u0435\u043D\u0442\u0438\u0447\u043D\u043E\u0441\u0442\u0438xs \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044F\u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F\u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432\u0438\u043C\u0435\u043Dxs " + "\u043C\u0435\u0442\u043E\u0434\u043D\u0430\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u0438\u044Fxs \u043C\u043E\u0434\u0435\u043B\u044C\u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043Exs \u043D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0442\u0438\u043F\u0430xml \u043D\u0435\u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u044B\u0435\u043F\u043E\u0434\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0438xs \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430\u043F\u0440\u043E\u0431\u0435\u043B\u044C\u043D\u044B\u0445\u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432xs \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430\u0441\u043E\u0434\u0435\u0440\u0436\u0438\u043C\u043E\u0433\u043Exs " + "\u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u0435\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044Fxs \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B\u043E\u0442\u0431\u043E\u0440\u0430\u0443\u0437\u043B\u043E\u0432dom \u043F\u0435\u0440\u0435\u043D\u043E\u0441\u0441\u0442\u0440\u043E\u043Ajson \u043F\u043E\u0437\u0438\u0446\u0438\u044F\u0432\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0435dom \u043F\u0440\u043E\u0431\u0435\u043B\u044C\u043D\u044B\u0435\u0441\u0438\u043C\u0432\u043E\u043B\u044Bxml \u0442\u0438\u043F\u0430\u0442\u0440\u0438\u0431\u0443\u0442\u0430xml \u0442\u0438\u043F\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044Fjson " + "\u0442\u0438\u043F\u043A\u0430\u043D\u043E\u043D\u0438\u0447\u0435\u0441\u043A\u043E\u0433\u043Exml \u0442\u0438\u043F\u043A\u043E\u043C\u043F\u043E\u043D\u0435\u043D\u0442\u044Bxs \u0442\u0438\u043F\u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438xml \u0442\u0438\u043F\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430domxpath \u0442\u0438\u043F\u0443\u0437\u043B\u0430dom \u0442\u0438\u043F\u0443\u0437\u043B\u0430xml \u0444\u043E\u0440\u043C\u0430xml \u0444\u043E\u0440\u043C\u0430\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u044Fxs " + "\u0444\u043E\u0440\u043C\u0430\u0442\u0434\u0430\u0442\u044Bjson \u044D\u043A\u0440\u0430\u043D\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435\u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432json ";
-    const v8_system_enums_data_composition_system = "\u0432\u0438\u0434\u0441\u0440\u0430\u0432\u043D\u0435\u043D\u0438\u044F\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438\u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u0441\u043E\u0440\u0442\u0438\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0432\u043B\u043E\u0436\u0435\u043D\u043D\u044B\u0445\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u043E\u0432\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0438\u0442\u043E\u0433\u043E\u0432\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0433\u0440\u0443\u043F\u043F\u0438\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043F\u043E\u043B\u0435\u0439\u0433\u0440\u0443\u043F\u043F\u0438\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043F\u043E\u043B\u044F\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u043E\u0432\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0440\u0435\u0441\u0443\u0440\u0441\u043E\u0432\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0431\u0443\u0445\u0433\u0430\u043B\u0442\u0435\u0440\u0441\u043A\u043E\u0433\u043E\u043E\u0441\u0442\u0430\u0442\u043A\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0432\u044B\u0432\u043E\u0434\u0430\u0442\u0435\u043A\u0441\u0442\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0442\u0438\u043F\u0433\u0440\u0443\u043F\u043F\u0438\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0433\u0440\u0443\u043F\u043F\u044B\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u043E\u0432\u043E\u0442\u0431\u043E\u0440\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0434\u043E\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F\u043F\u0435\u0440\u0438\u043E\u0434\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0442\u0438\u043F\u0437\u0430\u0433\u043E\u043B\u043E\u0432\u043A\u0430\u043F\u043E\u043B\u0435\u0439\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u043C\u0430\u043A\u0435\u0442\u0430\u0433\u0440\u0443\u043F\u043F\u0438\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u043C\u0430\u043A\u0435\u0442\u0430\u043E\u0431\u043B\u0430\u0441\u0442\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u043E\u0441\u0442\u0430\u0442\u043A\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0442\u0438\u043F\u043F\u0435\u0440\u0438\u043E\u0434\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0440\u0430\u0437\u043C\u0435\u0449\u0435\u043D\u0438\u044F\u0442\u0435\u043A\u0441\u0442\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u0441\u0432\u044F\u0437\u0438\u043D\u0430\u0431\u043E\u0440\u043E\u0432\u0434\u0430\u043D\u043D\u044B\u0445\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u043B\u0435\u0433\u0435\u043D\u0434\u044B\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u044B\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0438\u044F\u043E\u0442\u0431\u043E\u0440\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0440\u0435\u0436\u0438\u043C\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0440\u0435\u0436\u0438\u043C\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0441\u043F\u043E\u0441\u043E\u0431\u0432\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0440\u0435\u0436\u0438\u043C\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0430\u0432\u0442\u043E\u043F\u043E\u0437\u0438\u0446\u0438\u044F\u0440\u0435\u0441\u0443\u0440\u0441\u043E\u0432\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0432\u0430\u0440\u0438\u0430\u043D\u0442\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u0433\u0440\u0443\u043F\u043F\u0438\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0440\u0435\u0441\u0443\u0440\u0441\u043E\u0432\u0432\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u0435\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0444\u0438\u043A\u0441\u0430\u0446\u0438\u044F\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0443\u0441\u043B\u043E\u0432\u043D\u043E\u0433\u043E\u043E\u0444\u043E\u0440\u043C\u043B\u0435\u043D\u0438\u044F\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 ";
-    const v8_system_enums_email = "\u0432\u0430\u0436\u043D\u043E\u0441\u0442\u044C\u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u043F\u043E\u0447\u0442\u043E\u0432\u043E\u0433\u043E\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430\u0442\u0435\u043A\u0441\u0442\u0430\u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u043F\u043E\u0447\u0442\u043E\u0432\u043E\u0433\u043E\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0441\u043F\u043E\u0441\u043E\u0431\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F\u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u043F\u043E\u0447\u0442\u043E\u0432\u043E\u0433\u043E\u0432\u043B\u043E\u0436\u0435\u043D\u0438\u044F " + "\u0441\u043F\u043E\u0441\u043E\u0431\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F\u043D\u0435ascii\u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432\u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u043F\u043E\u0447\u0442\u043E\u0432\u043E\u0433\u043E\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0442\u0438\u043F\u0442\u0435\u043A\u0441\u0442\u0430\u043F\u043E\u0447\u0442\u043E\u0432\u043E\u0433\u043E\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u043F\u0440\u043E\u0442\u043E\u043A\u043E\u043B\u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u043F\u043E\u0447\u0442\u044B " + "\u0441\u0442\u0430\u0442\u0443\u0441\u0440\u0430\u0437\u0431\u043E\u0440\u0430\u043F\u043E\u0447\u0442\u043E\u0432\u043E\u0433\u043E\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F ";
-    const v8_system_enums_logbook = "\u0440\u0435\u0436\u0438\u043C\u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438\u0437\u0430\u043F\u0438\u0441\u0438\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u0441\u0442\u0430\u0442\u0443\u0441\u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438\u0437\u0430\u043F\u0438\u0441\u0438\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u0443\u0440\u043E\u0432\u0435\u043D\u044C\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 ";
-    const v8_system_enums_cryptography = "\u0440\u0430\u0441\u043F\u043E\u043B\u043E\u0436\u0435\u043D\u0438\u0435\u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430\u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0432\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0438 \u0440\u0435\u0436\u0438\u043C\u0432\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F\u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0432\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0438 \u0440\u0435\u0436\u0438\u043C\u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438\u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u0430\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0438 " + "\u0442\u0438\u043F\u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0430\u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0432\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0438 ";
-    const v8_system_enums_zip = "\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u043A\u0430\u0438\u043C\u0435\u043D\u0444\u0430\u0439\u043B\u043E\u0432\u0432zip\u0444\u0430\u0439\u043B\u0435 \u043C\u0435\u0442\u043E\u0434\u0441\u0436\u0430\u0442\u0438\u044Fzip \u043C\u0435\u0442\u043E\u0434\u0448\u0438\u0444\u0440\u043E\u0432\u0430\u043D\u0438\u044Fzip \u0440\u0435\u0436\u0438\u043C\u0432\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F\u043F\u0443\u0442\u0435\u0439\u0444\u0430\u0439\u043B\u043E\u0432zip \u0440\u0435\u0436\u0438\u043C\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438\u043F\u043E\u0434\u043A\u0430\u0442\u0430\u043B\u043E\u0433\u043E\u0432zip " + "\u0440\u0435\u0436\u0438\u043C\u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u044F\u043F\u0443\u0442\u0435\u0439zip \u0443\u0440\u043E\u0432\u0435\u043D\u044C\u0441\u0436\u0430\u0442\u0438\u044Fzip ";
-    const v8_system_enums_other = "\u0437\u0432\u0443\u043A\u043E\u0432\u043E\u0435\u043E\u043F\u043E\u0432\u0435\u0449\u0435\u043D\u0438\u0435 \u043D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0435\u0440\u0435\u0445\u043E\u0434\u0430\u043A\u0441\u0442\u0440\u043E\u043A\u0435 \u043F\u043E\u0437\u0438\u0446\u0438\u044F\u0432\u043F\u043E\u0442\u043E\u043A\u0435 \u043F\u043E\u0440\u044F\u0434\u043E\u043A\u0431\u0430\u0439\u0442\u043E\u0432 \u0440\u0435\u0436\u0438\u043C\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0440\u0435\u0436\u0438\u043C\u0443\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u043A\u043E\u0439\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0441\u0435\u0440\u0432\u0438\u0441\u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u044B\u0445\u043F\u043E\u043A\u0443\u043F\u043E\u043A \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435\u0444\u043E\u043D\u043E\u0432\u043E\u0433\u043E\u0437\u0430\u0434\u0430\u043D\u0438\u044F \u0442\u0438\u043F\u043F\u043E\u0434\u043F\u0438\u0441\u0447\u0438\u043A\u0430\u0434\u043E\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u043C\u044B\u0445\u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u0439 \u0443\u0440\u043E\u0432\u0435\u043D\u044C\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u0437\u0430\u0449\u0438\u0449\u0435\u043D\u043D\u043E\u0433\u043E\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044Fftp ";
-    const v8_system_enums_request_schema = "\u043D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u043E\u0440\u044F\u0434\u043A\u0430\u0441\u0445\u0435\u043C\u044B\u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u0442\u0438\u043F\u0434\u043E\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F\u043F\u0435\u0440\u0438\u043E\u0434\u0430\u043C\u0438\u0441\u0445\u0435\u043C\u044B\u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u0442\u0438\u043F\u043A\u043E\u043D\u0442\u0440\u043E\u043B\u044C\u043D\u043E\u0439\u0442\u043E\u0447\u043A\u0438\u0441\u0445\u0435\u043C\u044B\u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u0442\u0438\u043F\u043E\u0431\u044A\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F\u0441\u0445\u0435\u043C\u044B\u0437\u0430\u043F\u0440\u043E\u0441\u0430 " + "\u0442\u0438\u043F\u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u0430\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E\u0439\u0442\u0430\u0431\u043B\u0438\u0446\u044B\u0441\u0445\u0435\u043C\u044B\u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u0442\u0438\u043F\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F\u0441\u0445\u0435\u043C\u044B\u0437\u0430\u043F\u0440\u043E\u0441\u0430 ";
-    const v8_system_enums_properties_of_metadata_objects = "http\u043C\u0435\u0442\u043E\u0434 \u0430\u0432\u0442\u043E\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u043E\u0431\u0449\u0435\u0433\u043E\u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u0430 \u0430\u0432\u0442\u043E\u043F\u0440\u0435\u0444\u0438\u043A\u0441\u043D\u043E\u043C\u0435\u0440\u0430\u0437\u0430\u0434\u0430\u0447\u0438 \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u0432\u0441\u0442\u0440\u043E\u0435\u043D\u043D\u043E\u0433\u043E\u044F\u0437\u044B\u043A\u0430 \u0432\u0438\u0434\u0438\u0435\u0440\u0430\u0440\u0445\u0438\u0438 \u0432\u0438\u0434\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u043D\u0430\u043A\u043E\u043F\u043B\u0435\u043D\u0438\u044F " + "\u0432\u0438\u0434\u0442\u0430\u0431\u043B\u0438\u0446\u044B\u0432\u043D\u0435\u0448\u043D\u0435\u0433\u043E\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0437\u0430\u043F\u0438\u0441\u044C\u0434\u0432\u0438\u0436\u0435\u043D\u0438\u0439\u043F\u0440\u0438\u043F\u0440\u043E\u0432\u0435\u0434\u0435\u043D\u0438\u0438 \u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u0435\u043F\u043E\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u0435\u0439 \u0438\u043D\u0434\u0435\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435 " + "\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0431\u0430\u0437\u044B\u043F\u043B\u0430\u043D\u0430\u0432\u0438\u0434\u043E\u0432\u0440\u0430\u0441\u0447\u0435\u0442\u0430 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0431\u044B\u0441\u0442\u0440\u043E\u0433\u043E\u0432\u044B\u0431\u043E\u0440\u0430 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u043E\u0431\u0449\u0435\u0433\u043E\u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u0430 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u043F\u043E\u0434\u0447\u0438\u043D\u0435\u043D\u0438\u044F " + "\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u043F\u043E\u043B\u043D\u043E\u0442\u0435\u043A\u0441\u0442\u043E\u0432\u043E\u0433\u043E\u043F\u043E\u0438\u0441\u043A\u0430 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0440\u0430\u0437\u0434\u0435\u043B\u044F\u0435\u043C\u044B\u0445\u0434\u0430\u043D\u043D\u044B\u0445\u043E\u0431\u0449\u0435\u0433\u043E\u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u0430 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u0430 " + "\u043D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u043D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F\u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438 \u043D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0435\u0440\u0435\u0434\u0430\u0447\u0438 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0440\u0435\u0434\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u043D\u044B\u0445\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u043E\u043F\u0435\u0440\u0430\u0442\u0438\u0432\u043D\u043E\u0435\u043F\u0440\u043E\u0432\u0435\u0434\u0435\u043D\u0438\u0435 \u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0435\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u0432\u0438\u0434\u0430\u0440\u0430\u0441\u0447\u0435\u0442\u0430 \u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0435\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u0432\u0438\u0434\u0430\u0445\u0430\u0440\u0430\u043A\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043A\u0438 \u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0435\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u0437\u0430\u0434\u0430\u0447\u0438 " + "\u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0435\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u043B\u0430\u043D\u0430\u043E\u0431\u043C\u0435\u043D\u0430 \u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0435\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u0441\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A\u0430 \u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0435\u043F\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u0441\u0447\u0435\u0442\u0430 \u043F\u0435\u0440\u0435\u043C\u0435\u0449\u0435\u043D\u0438\u0435\u0433\u0440\u0430\u043D\u0438\u0446\u044B\u043F\u0440\u0438\u043F\u0440\u043E\u0432\u0435\u0434\u0435\u043D\u0438\u0438 " + "\u043F\u0435\u0440\u0438\u043E\u0434\u0438\u0447\u043D\u043E\u0441\u0442\u044C\u043D\u043E\u043C\u0435\u0440\u0430\u0431\u0438\u0437\u043D\u0435\u0441\u043F\u0440\u043E\u0446\u0435\u0441\u0441\u0430 \u043F\u0435\u0440\u0438\u043E\u0434\u0438\u0447\u043D\u043E\u0441\u0442\u044C\u043D\u043E\u043C\u0435\u0440\u0430\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u043F\u0435\u0440\u0438\u043E\u0434\u0438\u0447\u043D\u043E\u0441\u0442\u044C\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0440\u0430\u0441\u0447\u0435\u0442\u0430 \u043F\u0435\u0440\u0438\u043E\u0434\u0438\u0447\u043D\u043E\u0441\u0442\u044C\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0441\u0432\u0435\u0434\u0435\u043D\u0438\u0439 " + "\u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E\u0435\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0432\u043E\u0437\u0432\u0440\u0430\u0449\u0430\u0435\u043C\u044B\u0445\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439 \u043F\u043E\u043B\u043D\u043E\u0442\u0435\u043A\u0441\u0442\u043E\u0432\u044B\u0439\u043F\u043E\u0438\u0441\u043A\u043F\u0440\u0438\u0432\u0432\u043E\u0434\u0435\u043F\u043E\u0441\u0442\u0440\u043E\u043A\u0435 \u043F\u0440\u0438\u043D\u0430\u0434\u043B\u0435\u0436\u043D\u043E\u0441\u0442\u044C\u043E\u0431\u044A\u0435\u043A\u0442\u0430 \u043F\u0440\u043E\u0432\u0435\u0434\u0435\u043D\u0438\u0435 " + "\u0440\u0430\u0437\u0434\u0435\u043B\u0435\u043D\u0438\u0435\u0430\u0443\u0442\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0446\u0438\u0438\u043E\u0431\u0449\u0435\u0433\u043E\u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u0435\u043D\u0438\u0435\u0434\u0430\u043D\u043D\u044B\u0445\u043E\u0431\u0449\u0435\u0433\u043E\u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u0430 \u0440\u0430\u0437\u0434\u0435\u043B\u0435\u043D\u0438\u0435\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439\u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438\u043E\u0431\u0449\u0435\u0433\u043E\u0440\u0435\u043A\u0432\u0438\u0437\u0438\u0442\u0430 " + "\u0440\u0435\u0436\u0438\u043C\u0430\u0432\u0442\u043E\u043D\u0443\u043C\u0435\u0440\u0430\u0446\u0438\u0438\u043E\u0431\u044A\u0435\u043A\u0442\u043E\u0432 \u0440\u0435\u0436\u0438\u043C\u0437\u0430\u043F\u0438\u0441\u0438\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430 \u0440\u0435\u0436\u0438\u043C\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u043C\u043E\u0434\u0430\u043B\u044C\u043D\u043E\u0441\u0442\u0438 " + "\u0440\u0435\u0436\u0438\u043C\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u0441\u0438\u043D\u0445\u0440\u043E\u043D\u043D\u044B\u0445\u0432\u044B\u0437\u043E\u0432\u043E\u0432\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439\u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u044B\u0438\u0432\u043D\u0435\u0448\u043D\u0438\u0445\u043A\u043E\u043C\u043F\u043E\u043D\u0435\u043D\u0442 \u0440\u0435\u0436\u0438\u043C\u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E\u0433\u043E\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u0441\u0435\u0430\u043D\u0441\u043E\u0432 " + "\u0440\u0435\u0436\u0438\u043C\u043F\u043E\u043B\u0443\u0447\u0435\u043D\u0438\u044F\u0434\u0430\u043D\u043D\u044B\u0445\u0432\u044B\u0431\u043E\u0440\u0430\u043F\u0440\u0438\u0432\u0432\u043E\u0434\u0435\u043F\u043E\u0441\u0442\u0440\u043E\u043A\u0435 \u0440\u0435\u0436\u0438\u043C\u0441\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u043E\u0441\u0442\u0438 \u0440\u0435\u0436\u0438\u043C\u0441\u043E\u0432\u043C\u0435\u0441\u0442\u0438\u043C\u043E\u0441\u0442\u0438\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430 " + "\u0440\u0435\u0436\u0438\u043C\u0443\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u044F\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u043A\u043E\u0439\u0434\u0430\u043D\u043D\u044B\u0445\u043F\u043E\u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E \u0441\u0435\u0440\u0438\u0438\u043A\u043E\u0434\u043E\u0432\u043F\u043B\u0430\u043D\u0430\u0432\u0438\u0434\u043E\u0432\u0445\u0430\u0440\u0430\u043A\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043A \u0441\u0435\u0440\u0438\u0438\u043A\u043E\u0434\u043E\u0432\u043F\u043B\u0430\u043D\u0430\u0441\u0447\u0435\u0442\u043E\u0432 " + "\u0441\u0435\u0440\u0438\u0438\u043A\u043E\u0434\u043E\u0432\u0441\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A\u0430 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u0435\u043F\u0440\u0438\u0432\u0432\u043E\u0434\u0435 \u0441\u043F\u043E\u0441\u043E\u0431\u0432\u044B\u0431\u043E\u0440\u0430 \u0441\u043F\u043E\u0441\u043E\u0431\u043F\u043E\u0438\u0441\u043A\u0430\u0441\u0442\u0440\u043E\u043A\u0438\u043F\u0440\u0438\u0432\u0432\u043E\u0434\u0435\u043F\u043E\u0441\u0442\u0440\u043E\u043A\u0435 \u0441\u043F\u043E\u0441\u043E\u0431\u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F " + "\u0442\u0438\u043F\u0434\u0430\u043D\u043D\u044B\u0445\u0442\u0430\u0431\u043B\u0438\u0446\u044B\u0432\u043D\u0435\u0448\u043D\u0435\u0433\u043E\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0438\u043F\u043A\u043E\u0434\u0430\u043F\u043B\u0430\u043D\u0430\u0432\u0438\u0434\u043E\u0432\u0440\u0430\u0441\u0447\u0435\u0442\u0430 \u0442\u0438\u043F\u043A\u043E\u0434\u0430\u0441\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A\u0430 \u0442\u0438\u043F\u043C\u0430\u043A\u0435\u0442\u0430 \u0442\u0438\u043F\u043D\u043E\u043C\u0435\u0440\u0430\u0431\u0438\u0437\u043D\u0435\u0441\u043F\u0440\u043E\u0446\u0435\u0441\u0441\u0430 " + "\u0442\u0438\u043F\u043D\u043E\u043C\u0435\u0440\u0430\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430 \u0442\u0438\u043F\u043D\u043E\u043C\u0435\u0440\u0430\u0437\u0430\u0434\u0430\u0447\u0438 \u0442\u0438\u043F\u0444\u043E\u0440\u043C\u044B \u0443\u0434\u0430\u043B\u0435\u043D\u0438\u0435\u0434\u0432\u0438\u0436\u0435\u043D\u0438\u0439 ";
-    const v8_system_enums_differents = "\u0432\u0430\u0436\u043D\u043E\u0441\u0442\u044C\u043F\u0440\u043E\u0431\u043B\u0435\u043C\u044B\u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0438\u044F\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u044F\u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438 \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u0430\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u043C\u0430\u0441\u0448\u0442\u0430\u0431\u0430\u0444\u043E\u0440\u043C\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F " + "\u0432\u0430\u0440\u0438\u0430\u043D\u0442\u043E\u0441\u043D\u043E\u0432\u043D\u043E\u0433\u043E\u0448\u0440\u0438\u0444\u0442\u0430\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0433\u043E\u043F\u0435\u0440\u0438\u043E\u0434\u0430 \u0432\u0430\u0440\u0438\u0430\u043D\u0442\u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0439\u0434\u0430\u0442\u044B\u043D\u0430\u0447\u0430\u043B\u0430 \u0432\u0438\u0434\u0433\u0440\u0430\u043D\u0438\u0446\u044B \u0432\u0438\u0434\u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0438 " + "\u0432\u0438\u0434\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F\u043F\u043E\u043B\u043D\u043E\u0442\u0435\u043A\u0441\u0442\u043E\u0432\u043E\u0433\u043E\u043F\u043E\u0438\u0441\u043A\u0430 \u0432\u0438\u0434\u0440\u0430\u043C\u043A\u0438 \u0432\u0438\u0434\u0441\u0440\u0430\u0432\u043D\u0435\u043D\u0438\u044F \u0432\u0438\u0434\u0446\u0432\u0435\u0442\u0430 \u0432\u0438\u0434\u0447\u0438\u0441\u043B\u043E\u0432\u043E\u0433\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F \u0432\u0438\u0434\u0448\u0440\u0438\u0444\u0442\u0430 \u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u0430\u044F\u0434\u043B\u0438\u043D\u0430 \u0434\u043E\u043F\u0443\u0441\u0442\u0438\u043C\u044B\u0439\u0437\u043D\u0430\u043A " + "\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435byteordermark \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445\u043F\u043E\u043B\u043D\u043E\u0442\u0435\u043A\u0441\u0442\u043E\u0432\u043E\u0433\u043E\u043F\u043E\u0438\u0441\u043A\u0430 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0439\u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438 \u043A\u043B\u0430\u0432\u0438\u0448\u0430 \u043A\u043E\u0434\u0432\u043E\u0437\u0432\u0440\u0430\u0442\u0430\u0434\u0438\u0430\u043B\u043E\u0433\u0430 " + "\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u043A\u0430xbase \u043A\u043E\u0434\u0438\u0440\u043E\u0432\u043A\u0430\u0442\u0435\u043A\u0441\u0442\u0430 \u043D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u043E\u0438\u0441\u043A\u0430 \u043D\u0430\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u0438\u0435\u0441\u043E\u0440\u0442\u0438\u0440\u043E\u0432\u043A\u0438 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0440\u0435\u0434\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u043D\u044B\u0445\u0434\u0430\u043D\u043D\u044B\u0445 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435\u043F\u0440\u0438\u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043F\u0430\u043D\u0435\u043B\u0438\u0440\u0430\u0437\u0434\u0435\u043B\u043E\u0432 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430\u0437\u0430\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u044F \u0440\u0435\u0436\u0438\u043C\u0434\u0438\u0430\u043B\u043E\u0433\u0430\u0432\u043E\u043F\u0440\u043E\u0441 \u0440\u0435\u0436\u0438\u043C\u0437\u0430\u043F\u0443\u0441\u043A\u0430\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0440\u0435\u0436\u0438\u043C\u043E\u043A\u0440\u0443\u0433\u043B\u0435\u043D\u0438\u044F \u0440\u0435\u0436\u0438\u043C\u043E\u0442\u043A\u0440\u044B\u0442\u0438\u044F\u0444\u043E\u0440\u043C\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F " + "\u0440\u0435\u0436\u0438\u043C\u043F\u043E\u043B\u043D\u043E\u0442\u0435\u043A\u0441\u0442\u043E\u0432\u043E\u0433\u043E\u043F\u043E\u0438\u0441\u043A\u0430 \u0441\u043A\u043E\u0440\u043E\u0441\u0442\u044C\u043A\u043B\u0438\u0435\u043D\u0442\u0441\u043A\u043E\u0433\u043E\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u044F \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435\u0432\u043D\u0435\u0448\u043D\u0435\u0433\u043E\u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u0435\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F\u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438\u0431\u0430\u0437\u044B\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0441\u043F\u043E\u0441\u043E\u0431\u0432\u044B\u0431\u043E\u0440\u0430\u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u0430windows \u0441\u043F\u043E\u0441\u043E\u0431\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F\u0441\u0442\u0440\u043E\u043A\u0438 \u0441\u0442\u0430\u0442\u0443\u0441\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0442\u0438\u043F\u0432\u043D\u0435\u0448\u043D\u0435\u0439\u043A\u043E\u043C\u043F\u043E\u043D\u0435\u043D\u0442\u044B \u0442\u0438\u043F\u043F\u043B\u0430\u0442\u0444\u043E\u0440\u043C\u044B \u0442\u0438\u043F\u043F\u043E\u0432\u0435\u0434\u0435\u043D\u0438\u044F\u043A\u043B\u0430\u0432\u0438\u0448\u0438enter " + "\u0442\u0438\u043F\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u0438\u043E\u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u0438\u0438\u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u044F\u043A\u043E\u043D\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438\u0431\u0430\u0437\u044B\u0434\u0430\u043D\u043D\u044B\u0445 \u0443\u0440\u043E\u0432\u0435\u043D\u044C\u0438\u0437\u043E\u043B\u044F\u0446\u0438\u0438\u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0439 \u0445\u0435\u0448\u0444\u0443\u043D\u043A\u0446\u0438\u044F \u0447\u0430\u0441\u0442\u0438\u0434\u0430\u0442\u044B";
+    const v8_system_sets_of_values = "webцвета windowsцвета windowsшрифты библиотекакартинок рамкистиля символы цветастиля шрифтыстиля ";
+    const v8_system_enums_interface = "автоматическоесохранениеданныхформывнастройках автонумерациявформе автораздвижениесерий " + "анимациядиаграммы вариантвыравниванияэлементовизаголовков вариантуправлениявысотойтаблицы " + "вертикальнаяпрокруткаформы вертикальноеположение вертикальноеположениеэлемента видгруппыформы " + "виддекорацииформы виддополненияэлементаформы видизмененияданных видкнопкиформы видпереключателя " + "видподписейкдиаграмме видполяформы видфлажка влияниеразмеранапузырекдиаграммы горизонтальноеположение " + "горизонтальноеположениеэлемента группировкаколонок группировкаподчиненныхэлементовформы " + "группыиэлементы действиеперетаскивания дополнительныйрежимотображения допустимыедействияперетаскивания " + "интервалмеждуэлементамиформы использованиевывода использованиеполосыпрокрутки " + "используемоезначениеточкибиржевойдиаграммы историявыборапривводе источникзначенийоситочекдиаграммы " + "источникзначенияразмерапузырькадиаграммы категориягруппыкоманд максимумсерий начальноеотображениедерева " + "начальноеотображениесписка обновлениетекстаредактирования ориентациядендрограммы ориентациядиаграммы " + "ориентацияметокдиаграммы ориентацияметоксводнойдиаграммы ориентацияэлементаформы отображениевдиаграмме " + "отображениевлегендедиаграммы отображениегруппыкнопок отображениезаголовкашкалыдиаграммы " + "отображениезначенийсводнойдиаграммы отображениезначенияизмерительнойдиаграммы " + "отображениеинтерваладиаграммыганта отображениекнопки отображениекнопкивыбора отображениеобсужденийформы " + "отображениеобычнойгруппы отображениеотрицательныхзначенийпузырьковойдиаграммы отображениепанелипоиска " + "отображениеподсказки отображениепредупрежденияприредактировании отображениеразметкиполосырегулирования " + "отображениестраницформы отображениетаблицы отображениетекстазначениядиаграммыганта " + "отображениеуправленияобычнойгруппы отображениефигурыкнопки палитрацветовдиаграммы поведениеобычнойгруппы " + "поддержкамасштабадендрограммы поддержкамасштабадиаграммыганта поддержкамасштабасводнойдиаграммы " + "поисквтаблицепривводе положениезаголовкаэлементаформы положениекартинкикнопкиформы " + "положениекартинкиэлементаграфическойсхемы положениекоманднойпанелиформы положениекоманднойпанелиэлементаформы " + "положениеопорнойточкиотрисовки положениеподписейкдиаграмме положениеподписейшкалызначенийизмерительнойдиаграммы " + "положениесостоянияпросмотра положениестрокипоиска положениетекстасоединительнойлинии положениеуправленияпоиском " + "положениешкалывремени порядокотображенияточекгоризонтальнойгистограммы порядоксерийвлегендедиаграммы " + "размеркартинки расположениезаголовкашкалыдиаграммы растягиваниеповертикалидиаграммыганта " + "режимавтоотображениясостояния режимвводастроктаблицы режимвыборанезаполненного режимвыделениядаты " + "режимвыделениястрокитаблицы режимвыделениятаблицы режимизмененияразмера режимизменениясвязанногозначения " + "режимиспользованиядиалогапечати режимиспользованияпараметракоманды режиммасштабированияпросмотра " + "режимосновногоокнаклиентскогоприложения режимоткрытияокнаформы режимотображениявыделения " + "режимотображениягеографическойсхемы режимотображениязначенийсерии режимотрисовкисеткиграфическойсхемы " + "режимполупрозрачностидиаграммы режимпробеловдиаграммы режимразмещениянастранице режимредактированияколонки " + "режимсглаживаниядиаграммы режимсглаживанияиндикатора режимсписказадач сквозноевыравнивание " + "сохранениеданныхформывнастройках способзаполнениятекстазаголовкашкалыдиаграммы " + "способопределенияограничивающегозначениядиаграммы стандартнаягруппакоманд стандартноеоформление " + "статусоповещенияпользователя стильстрелки типаппроксимациилиниитрендадиаграммы типдиаграммы " + "типединицышкалывремени типимпортасерийслоягеографическойсхемы типлиниигеографическойсхемы типлиниидиаграммы " + "типмаркерагеографическойсхемы типмаркерадиаграммы типобластиоформления " + "типорганизацииисточникаданныхгеографическойсхемы типотображениясериислоягеографическойсхемы " + "типотображенияточечногообъектагеографическойсхемы типотображенияшкалыэлементалегендыгеографическойсхемы " + "типпоискаобъектовгеографическойсхемы типпроекциигеографическойсхемы типразмещенияизмерений " + "типразмещенияреквизитовизмерений типрамкиэлементауправления типсводнойдиаграммы " + "типсвязидиаграммыганта типсоединениязначенийпосериямдиаграммы типсоединенияточекдиаграммы " + "типсоединительнойлинии типстороныэлементаграфическойсхемы типформыотчета типшкалырадарнойдиаграммы " + "факторлиниитрендадиаграммы фигуракнопки фигурыграфическойсхемы фиксациявтаблице форматдняшкалывремени " + "форматкартинки ширинаподчиненныхэлементовформы ";
+    const v8_system_enums_objects_properties = "виддвижениябухгалтерии виддвижениянакопления видпериодарегистрарасчета видсчета видточкимаршрутабизнеспроцесса " + "использованиеагрегатарегистранакопления использованиегруппиэлементов использованиережимапроведения " + "использованиесреза периодичностьагрегатарегистранакопления режимавтовремя режимзаписидокумента режимпроведениядокумента ";
+    const v8_system_enums_exchange_plans = "авторегистрацияизменений допустимыйномерсообщения отправкаэлементаданных получениеэлементаданных ";
+    const v8_system_enums_tabular_document = "использованиерасшифровкитабличногодокумента ориентациястраницы положениеитоговколоноксводнойтаблицы " + "положениеитоговстроксводнойтаблицы положениетекстаотносительнокартинки расположениезаголовкагруппировкитабличногодокумента " + "способчтениязначенийтабличногодокумента типдвустороннейпечати типзаполненияобластитабличногодокумента " + "типкурсоровтабличногодокумента типлиниирисункатабличногодокумента типлинииячейкитабличногодокумента " + "типнаправленияпереходатабличногодокумента типотображениявыделениятабличногодокумента типотображениялинийсводнойтаблицы " + "типразмещениятекстатабличногодокумента типрисункатабличногодокумента типсмещениятабличногодокумента " + "типузоратабличногодокумента типфайлатабличногодокумента точностьпечати чередованиерасположениястраниц ";
+    const v8_system_enums_sheduler = "отображениевремениэлементовпланировщика ";
+    const v8_system_enums_formatted_document = "типфайлаформатированногодокумента ";
+    const v8_system_enums_query = "обходрезультатазапроса типзаписизапроса ";
+    const v8_system_enums_report_builder = "видзаполнениярасшифровкипостроителяотчета типдобавленияпредставлений типизмеренияпостроителяотчета типразмещенияитогов ";
+    const v8_system_enums_files = "доступкфайлу режимдиалогавыборафайла режимоткрытияфайла ";
+    const v8_system_enums_query_builder = "типизмеренияпостроителязапроса ";
+    const v8_system_enums_data_analysis = "видданныханализа методкластеризации типединицыинтервалавременианализаданных типзаполнениятаблицырезультатаанализаданных " + "типиспользованиячисловыхзначенийанализаданных типисточникаданныхпоискаассоциаций типколонкианализаданныхдереворешений " + "типколонкианализаданныхкластеризация типколонкианализаданныхобщаястатистика типколонкианализаданныхпоискассоциаций " + "типколонкианализаданныхпоискпоследовательностей типколонкимоделипрогноза типмерырасстоянияанализаданных " + "типотсеченияправилассоциации типполяанализаданных типстандартизациианализаданных типупорядочиванияправилассоциациианализаданных " + "типупорядочиванияшаблоновпоследовательностейанализаданных типупрощениядереварешений ";
+    const v8_system_enums_xml_json_xs_dom_xdto_ws = "wsнаправлениепараметра вариантxpathxs вариантзаписидатыjson вариантпростоготипаxs видгруппымоделиxs видфасетаxdto " + "действиепостроителяdom завершенностьпростоготипаxs завершенностьсоставноготипаxs завершенностьсхемыxs запрещенныеподстановкиxs " + "исключениягруппподстановкиxs категорияиспользованияатрибутаxs категорияограниченияидентичностиxs категорияограниченияпространствименxs " + "методнаследованияxs модельсодержимогоxs назначениетипаxml недопустимыеподстановкиxs обработкапробельныхсимволовxs обработкасодержимогоxs " + "ограничениезначенияxs параметрыотбораузловdom переносстрокjson позициявдокументеdom пробельныесимволыxml типатрибутаxml типзначенияjson " + "типканоническогоxml типкомпонентыxs типпроверкиxml типрезультатаdomxpath типузлаdom типузлаxml формаxml формапредставленияxs " + "форматдатыjson экранированиесимволовjson ";
+    const v8_system_enums_data_composition_system = "видсравнениякомпоновкиданных действиеобработкирасшифровкикомпоновкиданных направлениесортировкикомпоновкиданных " + "расположениевложенныхэлементоврезультатакомпоновкиданных расположениеитоговкомпоновкиданных расположениегруппировкикомпоновкиданных " + "расположениеполейгруппировкикомпоновкиданных расположениеполякомпоновкиданных расположениереквизитовкомпоновкиданных " + "расположениересурсовкомпоновкиданных типбухгалтерскогоостаткакомпоновкиданных типвыводатекстакомпоновкиданных " + "типгруппировкикомпоновкиданных типгруппыэлементовотборакомпоновкиданных типдополненияпериодакомпоновкиданных " + "типзаголовкаполейкомпоновкиданных типмакетагруппировкикомпоновкиданных типмакетаобластикомпоновкиданных типостаткакомпоновкиданных " + "типпериодакомпоновкиданных типразмещениятекстакомпоновкиданных типсвязинаборовданныхкомпоновкиданных типэлементарезультатакомпоновкиданных " + "расположениелегендыдиаграммыкомпоновкиданных типпримененияотборакомпоновкиданных режимотображенияэлементанастройкикомпоновкиданных " + "режимотображениянастроеккомпоновкиданных состояниеэлементанастройкикомпоновкиданных способвосстановлениянастроеккомпоновкиданных " + "режимкомпоновкирезультата использованиепараметракомпоновкиданных автопозицияресурсовкомпоновкиданных " + "вариантиспользованиягруппировкикомпоновкиданных расположениересурсоввдиаграммекомпоновкиданных фиксациякомпоновкиданных " + "использованиеусловногооформлениякомпоновкиданных ";
+    const v8_system_enums_email = "важностьинтернетпочтовогосообщения обработкатекстаинтернетпочтовогосообщения способкодированияинтернетпочтовоговложения " + "способкодированиянеasciiсимволовинтернетпочтовогосообщения типтекстапочтовогосообщения протоколинтернетпочты " + "статусразборапочтовогосообщения ";
+    const v8_system_enums_logbook = "режимтранзакциизаписижурналарегистрации статустранзакциизаписижурналарегистрации уровеньжурналарегистрации ";
+    const v8_system_enums_cryptography = "расположениехранилищасертификатовкриптографии режимвключениясертификатовкриптографии режимпроверкисертификатакриптографии " + "типхранилищасертификатовкриптографии ";
+    const v8_system_enums_zip = "кодировкаименфайловвzipфайле методсжатияzip методшифрованияzip режимвосстановленияпутейфайловzip режимобработкиподкаталоговzip " + "режимсохраненияпутейzip уровеньсжатияzip ";
+    const v8_system_enums_other = "звуковоеоповещение направлениепереходакстроке позициявпотоке порядокбайтов режимблокировкиданных режимуправленияблокировкойданных " + "сервисвстроенныхпокупок состояниефоновогозадания типподписчикадоставляемыхуведомлений уровеньиспользованиязащищенногосоединенияftp ";
+    const v8_system_enums_request_schema = "направлениепорядкасхемызапроса типдополненияпериодамисхемызапроса типконтрольнойточкисхемызапроса типобъединениясхемызапроса " + "типпараметрадоступнойтаблицысхемызапроса типсоединениясхемызапроса ";
+    const v8_system_enums_properties_of_metadata_objects = "httpметод автоиспользованиеобщегореквизита автопрефиксномеразадачи вариантвстроенногоязыка видиерархии видрегистранакопления " + "видтаблицывнешнегоисточникаданных записьдвиженийприпроведении заполнениепоследовательностей индексирование " + "использованиебазыпланавидоврасчета использованиебыстроговыбора использованиеобщегореквизита использованиеподчинения " + "использованиеполнотекстовогопоиска использованиеразделяемыхданныхобщегореквизита использованиереквизита " + "назначениеиспользованияприложения назначениерасширенияконфигурации направлениепередачи обновлениепредопределенныхданных " + "оперативноепроведение основноепредставлениевидарасчета основноепредставлениевидахарактеристики основноепредставлениезадачи " + "основноепредставлениепланаобмена основноепредставлениесправочника основноепредставлениесчета перемещениеграницыприпроведении " + "периодичностьномерабизнеспроцесса периодичностьномерадокумента периодичностьрегистрарасчета периодичностьрегистрасведений " + "повторноеиспользованиевозвращаемыхзначений полнотекстовыйпоискпривводепостроке принадлежностьобъекта проведение " + "разделениеаутентификацииобщегореквизита разделениеданныхобщегореквизита разделениерасширенийконфигурацииобщегореквизита " + "режимавтонумерацииобъектов режимзаписирегистра режимиспользованиямодальности " + "режимиспользованиясинхронныхвызововрасширенийплатформыивнешнихкомпонент режимповторногоиспользованиясеансов " + "режимполученияданныхвыборапривводепостроке режимсовместимости режимсовместимостиинтерфейса " + "режимуправленияблокировкойданныхпоумолчанию сериикодовпланавидовхарактеристик сериикодовпланасчетов " + "сериикодовсправочника созданиепривводе способвыбора способпоискастрокипривводепостроке способредактирования " + "типданныхтаблицывнешнегоисточникаданных типкодапланавидоврасчета типкодасправочника типмакета типномерабизнеспроцесса " + "типномерадокумента типномеразадачи типформы удалениедвижений ";
+    const v8_system_enums_differents = "важностьпроблемыприменениярасширенияконфигурации вариантинтерфейсаклиентскогоприложения вариантмасштабаформклиентскогоприложения " + "вариантосновногошрифтаклиентскогоприложения вариантстандартногопериода вариантстандартнойдатыначала видграницы видкартинки " + "видотображенияполнотекстовогопоиска видрамки видсравнения видцвета видчисловогозначения видшрифта допустимаядлина допустимыйзнак " + "использованиеbyteordermark использованиеметаданныхполнотекстовогопоиска источникрасширенийконфигурации клавиша кодвозвратадиалога " + "кодировкаxbase кодировкатекста направлениепоиска направлениесортировки обновлениепредопределенныхданных обновлениеприизмененииданных " + "отображениепанелиразделов проверказаполнения режимдиалогавопрос режимзапускаклиентскогоприложения режимокругления режимоткрытияформприложения " + "режимполнотекстовогопоиска скоростьклиентскогосоединения состояниевнешнегоисточникаданных состояниеобновленияконфигурациибазыданных " + "способвыборасертификатаwindows способкодированиястроки статуссообщения типвнешнейкомпоненты типплатформы типповеденияклавишиenter " + "типэлементаинформацииовыполненииобновленияконфигурациибазыданных уровеньизоляциитранзакций хешфункция частидаты";
     const CLASS = v8_system_sets_of_values + v8_system_enums_interface + v8_system_enums_objects_properties + v8_system_enums_exchange_plans + v8_system_enums_tabular_document + v8_system_enums_sheduler + v8_system_enums_formatted_document + v8_system_enums_query + v8_system_enums_report_builder + v8_system_enums_files + v8_system_enums_query_builder + v8_system_enums_data_analysis + v8_system_enums_xml_json_xs_dom_xdto_ws + v8_system_enums_data_composition_system + v8_system_enums_email + v8_system_enums_logbook + v8_system_enums_cryptography + v8_system_enums_zip + v8_system_enums_other + v8_system_enums_request_schema + v8_system_enums_properties_of_metadata_objects + v8_system_enums_differents;
-    const v8_shared_object = "com\u043E\u0431\u044A\u0435\u043A\u0442 ftp\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435 http\u0437\u0430\u043F\u0440\u043E\u0441 http\u0441\u0435\u0440\u0432\u0438\u0441\u043E\u0442\u0432\u0435\u0442 http\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435 ws\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u0438\u044F ws\u043F\u0440\u043E\u043A\u0441\u0438 xbase \u0430\u043D\u0430\u043B\u0438\u0437\u0434\u0430\u043D\u043D\u044B\u0445 \u0430\u043D\u043D\u043E\u0442\u0430\u0446\u0438\u044Fxs " + "\u0431\u043B\u043E\u043A\u0438\u0440\u043E\u0432\u043A\u0430\u0434\u0430\u043D\u043D\u044B\u0445 \u0431\u0443\u0444\u0435\u0440\u0434\u0432\u043E\u0438\u0447\u043D\u044B\u0445\u0434\u0430\u043D\u043D\u044B\u0445 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435xs \u0432\u044B\u0440\u0430\u0436\u0435\u043D\u0438\u0435\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0433\u0435\u043D\u0435\u0440\u0430\u0442\u043E\u0440\u0441\u043B\u0443\u0447\u0430\u0439\u043D\u044B\u0445\u0447\u0438\u0441\u0435\u043B \u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u0430\u044F\u0441\u0445\u0435\u043C\u0430 " + "\u0433\u0435\u043E\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u0438\u0435\u043A\u043E\u043E\u0440\u0434\u0438\u043D\u0430\u0442\u044B \u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u0430\u044F\u0441\u0445\u0435\u043C\u0430 \u0433\u0440\u0443\u043F\u043F\u0430\u043C\u043E\u0434\u0435\u043B\u0438xs \u0434\u0430\u043D\u043D\u044B\u0435\u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0434\u0432\u043E\u0438\u0447\u043D\u044B\u0435\u0434\u0430\u043D\u043D\u044B\u0435 \u0434\u0435\u043D\u0434\u0440\u043E\u0433\u0440\u0430\u043C\u043C\u0430 " + "\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u0430 \u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u0430\u0433\u0430\u043D\u0442\u0430 \u0434\u0438\u0430\u043B\u043E\u0433\u0432\u044B\u0431\u043E\u0440\u0430\u0444\u0430\u0439\u043B\u0430 \u0434\u0438\u0430\u043B\u043E\u0433\u0432\u044B\u0431\u043E\u0440\u0430\u0446\u0432\u0435\u0442\u0430 \u0434\u0438\u0430\u043B\u043E\u0433\u0432\u044B\u0431\u043E\u0440\u0430\u0448\u0440\u0438\u0444\u0442\u0430 \u0434\u0438\u0430\u043B\u043E\u0433\u0440\u0430\u0441\u043F\u0438\u0441\u0430\u043D\u0438\u044F\u0440\u0435\u0433\u043B\u0430\u043C\u0435\u043D\u0442\u043D\u043E\u0433\u043E\u0437\u0430\u0434\u0430\u043D\u0438\u044F " + "\u0434\u0438\u0430\u043B\u043E\u0433\u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F\u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u043E\u0433\u043E\u043F\u0435\u0440\u0438\u043E\u0434\u0430 \u0434\u0438\u0430\u043F\u0430\u0437\u043E\u043D \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442dom \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442html \u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430\u0446\u0438\u044Fxs \u0434\u043E\u0441\u0442\u0430\u0432\u043B\u044F\u0435\u043C\u043E\u0435\u0443\u0432\u0435\u0434\u043E\u043C\u043B\u0435\u043D\u0438\u0435 " + "\u0437\u0430\u043F\u0438\u0441\u044Cdom \u0437\u0430\u043F\u0438\u0441\u044Cfastinfoset \u0437\u0430\u043F\u0438\u0441\u044Chtml \u0437\u0430\u043F\u0438\u0441\u044Cjson \u0437\u0430\u043F\u0438\u0441\u044Cxml \u0437\u0430\u043F\u0438\u0441\u044Czip\u0444\u0430\u0439\u043B\u0430 \u0437\u0430\u043F\u0438\u0441\u044C\u0434\u0430\u043D\u043D\u044B\u0445 \u0437\u0430\u043F\u0438\u0441\u044C\u0442\u0435\u043A\u0441\u0442\u0430 \u0437\u0430\u043F\u0438\u0441\u044C\u0443\u0437\u043B\u043E\u0432dom " + "\u0437\u0430\u043F\u0440\u043E\u0441 \u0437\u0430\u0449\u0438\u0449\u0435\u043D\u043D\u043E\u0435\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435openssl \u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F\u043F\u043E\u043B\u0435\u0439\u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0438\u0437\u0432\u043B\u0435\u0447\u0435\u043D\u0438\u0435\u0442\u0435\u043A\u0441\u0442\u0430 \u0438\u043C\u043F\u043E\u0440\u0442xs \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u043F\u043E\u0447\u0442\u0430 " + "\u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u043F\u043E\u0447\u0442\u043E\u0432\u043E\u0435\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u043F\u043E\u0447\u0442\u043E\u0432\u044B\u0439\u043F\u0440\u043E\u0444\u0438\u043B\u044C \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u043F\u0440\u043E\u043A\u0441\u0438 \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442\u0441\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435 \u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u044F\u0434\u043B\u044F\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044Fxs " + "\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0430\u0442\u0440\u0438\u0431\u0443\u0442\u0430xs \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u0441\u043E\u0431\u044B\u0442\u0438\u044F\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u044B\u0445\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u0438\u0442\u0435\u0440\u0430\u0442\u043E\u0440\u0443\u0437\u043B\u043E\u0432dom \u043A\u0430\u0440\u0442\u0438\u043D\u043A\u0430 \u043A\u0432\u0430\u043B\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440\u044B\u0434\u0430\u0442\u044B \u043A\u0432\u0430\u043B\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440\u044B\u0434\u0432\u043E\u0438\u0447\u043D\u044B\u0445\u0434\u0430\u043D\u043D\u044B\u0445 \u043A\u0432\u0430\u043B\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440\u044B\u0441\u0442\u0440\u043E\u043A\u0438 \u043A\u0432\u0430\u043B\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440\u044B\u0447\u0438\u0441\u043B\u0430 " + "\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u0449\u0438\u043A\u043C\u0430\u043A\u0435\u0442\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u0449\u0438\u043A\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043A\u043E\u043D\u0441\u0442\u0440\u0443\u043A\u0442\u043E\u0440\u043C\u0430\u043A\u0435\u0442\u0430\u043E\u0444\u043E\u0440\u043C\u043B\u0435\u043D\u0438\u044F\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u043A\u043E\u043D\u0441\u0442\u0440\u0443\u043A\u0442\u043E\u0440\u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043A\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043A\u043E\u043D\u0441\u0442\u0440\u0443\u043A\u0442\u043E\u0440\u0444\u043E\u0440\u043C\u0430\u0442\u043D\u043E\u0439\u0441\u0442\u0440\u043E\u043A\u0438 \u043B\u0438\u043D\u0438\u044F \u043C\u0430\u043A\u0435\u0442\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043C\u0430\u043A\u0435\u0442\u043E\u0431\u043B\u0430\u0441\u0442\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u043C\u0430\u043A\u0435\u0442\u043E\u0444\u043E\u0440\u043C\u043B\u0435\u043D\u0438\u044F\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043C\u0430\u0441\u043A\u0430xs \u043C\u0435\u043D\u0435\u0434\u0436\u0435\u0440\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0438 \u043D\u0430\u0431\u043E\u0440\u0441\u0445\u0435\u043Cxml \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438\u0441\u0435\u0440\u0438\u0430\u043B\u0438\u0437\u0430\u0446\u0438\u0438json " + "\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430\u043A\u0430\u0440\u0442\u0438\u043D\u043E\u043A \u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0430\u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043E\u0431\u0445\u043E\u0434\u0434\u0435\u0440\u0435\u0432\u0430dom \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u0435\u0430\u0442\u0440\u0438\u0431\u0443\u0442\u0430xs \u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u0435\u043D\u043E\u0442\u0430\u0446\u0438\u0438xs " + "\u043E\u0431\u044A\u044F\u0432\u043B\u0435\u043D\u0438\u0435\u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0430xs \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u0441\u043E\u0431\u044B\u0442\u0438\u044F\u0434\u043E\u0441\u0442\u0443\u043F\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 " + "\u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435\u0438\u0441\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u043D\u0438\u044F\u0441\u043E\u0431\u044B\u0442\u0438\u044F\u043E\u0442\u043A\u0430\u0437\u0432\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u0436\u0443\u0440\u043D\u0430\u043B\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u0438 \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438\u0440\u0430\u0441\u0448\u0438\u0444\u0440\u043E\u0432\u043A\u0438\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435\u043F\u0435\u0440\u0435\u0434\u0430\u0432\u0430\u0435\u043C\u043E\u0433\u043E\u0444\u0430\u0439\u043B\u0430 \u043E\u043F\u0438\u0441\u0430\u043D\u0438\u0435\u0442\u0438\u043F\u043E\u0432 \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u0438\u0435\u0433\u0440\u0443\u043F\u043F\u044B\u0430\u0442\u0440\u0438\u0431\u0443\u0442\u043E\u0432xs \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u0438\u0435\u0433\u0440\u0443\u043F\u043F\u044B\u043C\u043E\u0434\u0435\u043B\u0438xs " + "\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u0438\u0435\u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F\u0438\u0434\u0435\u043D\u0442\u0438\u0447\u043D\u043E\u0441\u0442\u0438xs \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u0438\u0435\u043F\u0440\u043E\u0441\u0442\u043E\u0433\u043E\u0442\u0438\u043F\u0430xs \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u0438\u0435\u0441\u043E\u0441\u0442\u0430\u0432\u043D\u043E\u0433\u043E\u0442\u0438\u043F\u0430xs \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u0438\u0435\u0442\u0438\u043F\u0430\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u0430dom " + "\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u0438\u044Fxpathxs \u043E\u0442\u0431\u043E\u0440\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043F\u0430\u043A\u0435\u0442\u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0430\u0435\u043C\u044B\u0445\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442\u043E\u0432 \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u0432\u044B\u0431\u043E\u0440\u0430 \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B\u0437\u0430\u043F\u0438\u0441\u0438json \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B\u0437\u0430\u043F\u0438\u0441\u0438xml \u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u044B\u0447\u0442\u0435\u043D\u0438\u044Fxml \u043F\u0435\u0440\u0435\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u0438\u0435xs \u043F\u043B\u0430\u043D\u0438\u0440\u043E\u0432\u0449\u0438\u043A \u043F\u043E\u043B\u0435\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u043F\u043E\u043B\u0435\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u043F\u043E\u0441\u0442\u0440\u043E\u0438\u0442\u0435\u043B\u044Cdom \u043F\u043E\u0441\u0442\u0440\u043E\u0438\u0442\u0435\u043B\u044C\u0437\u0430\u043F\u0440\u043E\u0441\u0430 \u043F\u043E\u0441\u0442\u0440\u043E\u0438\u0442\u0435\u043B\u044C\u043E\u0442\u0447\u0435\u0442\u0430 \u043F\u043E\u0441\u0442\u0440\u043E\u0438\u0442\u0435\u043B\u044C\u043E\u0442\u0447\u0435\u0442\u0430\u0430\u043D\u0430\u043B\u0438\u0437\u0430\u0434\u0430\u043D\u043D\u044B\u0445 " + "\u043F\u043E\u0441\u0442\u0440\u043E\u0438\u0442\u0435\u043B\u044C\u0441\u0445\u0435\u043Cxml \u043F\u043E\u0442\u043E\u043A \u043F\u043E\u0442\u043E\u043A\u0432\u043F\u0430\u043C\u044F\u0442\u0438 \u043F\u043E\u0447\u0442\u0430 \u043F\u043E\u0447\u0442\u043E\u0432\u043E\u0435\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043F\u0440\u0435\u043E\u0431\u0440\u0430\u0437\u043E\u0432\u0430\u043D\u0438\u0435xsl \u043F\u0440\u0435\u043E\u0431\u0440\u0430\u0437\u043E\u0432\u0430\u043D\u0438\u0435\u043A\u043A\u0430\u043D\u043E\u043D\u0438\u0447\u0435\u0441\u043A\u043E\u043C\u0443xml " + "\u043F\u0440\u043E\u0446\u0435\u0441\u0441\u043E\u0440\u0432\u044B\u0432\u043E\u0434\u0430\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445\u0432\u043A\u043E\u043B\u043B\u0435\u043A\u0446\u0438\u044E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439 \u043F\u0440\u043E\u0446\u0435\u0441\u0441\u043E\u0440\u0432\u044B\u0432\u043E\u0434\u0430\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445\u0432\u0442\u0430\u0431\u043B\u0438\u0447\u043D\u044B\u0439\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 " + "\u043F\u0440\u043E\u0446\u0435\u0441\u0441\u043E\u0440\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0440\u0430\u0437\u044B\u043C\u0435\u043D\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432\u0438\u043C\u0435\u043Ddom \u0440\u0430\u043C\u043A\u0430 \u0440\u0430\u0441\u043F\u0438\u0441\u0430\u043D\u0438\u0435\u0440\u0435\u0433\u043B\u0430\u043C\u0435\u043D\u0442\u043D\u043E\u0433\u043E\u0437\u0430\u0434\u0430\u043D\u0438\u044F \u0440\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u043D\u043E\u0435\u0438\u043C\u044Fxml " + "\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0447\u0442\u0435\u043D\u0438\u044F\u0434\u0430\u043D\u043D\u044B\u0445 \u0441\u0432\u043E\u0434\u043D\u0430\u044F\u0434\u0438\u0430\u0433\u0440\u0430\u043C\u043C\u0430 \u0441\u0432\u044F\u0437\u044C\u043F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u0430\u0432\u044B\u0431\u043E\u0440\u0430 \u0441\u0432\u044F\u0437\u044C\u043F\u043E\u0442\u0438\u043F\u0443 \u0441\u0432\u044F\u0437\u044C\u043F\u043E\u0442\u0438\u043F\u0443\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0441\u0435\u0440\u0438\u0430\u043B\u0438\u0437\u0430\u0442\u043E\u0440xdto " + "\u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043A\u043B\u0438\u0435\u043D\u0442\u0430windows \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043A\u043B\u0438\u0435\u043D\u0442\u0430\u0444\u0430\u0439\u043B \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043A\u0440\u0438\u043F\u0442\u043E\u0433\u0440\u0430\u0444\u0438\u0438 \u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u044B\u0443\u0434\u043E\u0441\u0442\u043E\u0432\u0435\u0440\u044F\u044E\u0449\u0438\u0445\u0446\u0435\u043D\u0442\u0440\u043E\u0432windows " + "\u0441\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u044B\u0443\u0434\u043E\u0441\u0442\u043E\u0432\u0435\u0440\u044F\u044E\u0449\u0438\u0445\u0446\u0435\u043D\u0442\u0440\u043E\u0432\u0444\u0430\u0439\u043B \u0441\u0436\u0430\u0442\u0438\u0435\u0434\u0430\u043D\u043D\u044B\u0445 \u0441\u0438\u0441\u0442\u0435\u043C\u043D\u0430\u044F\u0438\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u044F \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435\u043F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044E \u0441\u043E\u0447\u0435\u0442\u0430\u043D\u0438\u0435\u043A\u043B\u0430\u0432\u0438\u0448 " + "\u0441\u0440\u0430\u0432\u043D\u0435\u043D\u0438\u0435\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439 \u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u0430\u044F\u0434\u0430\u0442\u0430\u043D\u0430\u0447\u0430\u043B\u0430 \u0441\u0442\u0430\u043D\u0434\u0430\u0440\u0442\u043D\u044B\u0439\u043F\u0435\u0440\u0438\u043E\u0434 \u0441\u0445\u0435\u043C\u0430xml \u0441\u0445\u0435\u043C\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 \u0442\u0430\u0431\u043B\u0438\u0447\u043D\u044B\u0439\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 " + "\u0442\u0435\u043A\u0441\u0442\u043E\u0432\u044B\u0439\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 \u0442\u0435\u0441\u0442\u0438\u0440\u0443\u0435\u043C\u043E\u0435\u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u0435 \u0442\u0438\u043F\u0434\u0430\u043D\u043D\u044B\u0445xml \u0443\u043D\u0438\u043A\u0430\u043B\u044C\u043D\u044B\u0439\u0438\u0434\u0435\u043D\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u043E\u0440 \u0444\u0430\u0431\u0440\u0438\u043A\u0430xdto \u0444\u0430\u0439\u043B \u0444\u0430\u0439\u043B\u043E\u0432\u044B\u0439\u043F\u043E\u0442\u043E\u043A " + "\u0444\u0430\u0441\u0435\u0442\u0434\u043B\u0438\u043D\u044Bxs \u0444\u0430\u0441\u0435\u0442\u043A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u0430\u0440\u0430\u0437\u0440\u044F\u0434\u043E\u0432\u0434\u0440\u043E\u0431\u043D\u043E\u0439\u0447\u0430\u0441\u0442\u0438xs \u0444\u0430\u0441\u0435\u0442\u043C\u0430\u043A\u0441\u0438\u043C\u0430\u043B\u044C\u043D\u043E\u0433\u043E\u0432\u043A\u043B\u044E\u0447\u0430\u044E\u0449\u0435\u0433\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044Fxs " + "\u0444\u0430\u0441\u0435\u0442\u043C\u0430\u043A\u0441\u0438\u043C\u0430\u043B\u044C\u043D\u043E\u0433\u043E\u0438\u0441\u043A\u043B\u044E\u0447\u0430\u044E\u0449\u0435\u0433\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044Fxs \u0444\u0430\u0441\u0435\u0442\u043C\u0430\u043A\u0441\u0438\u043C\u0430\u043B\u044C\u043D\u043E\u0439\u0434\u043B\u0438\u043D\u044Bxs \u0444\u0430\u0441\u0435\u0442\u043C\u0438\u043D\u0438\u043C\u0430\u043B\u044C\u043D\u043E\u0433\u043E\u0432\u043A\u043B\u044E\u0447\u0430\u044E\u0449\u0435\u0433\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044Fxs " + "\u0444\u0430\u0441\u0435\u0442\u043C\u0438\u043D\u0438\u043C\u0430\u043B\u044C\u043D\u043E\u0433\u043E\u0438\u0441\u043A\u043B\u044E\u0447\u0430\u044E\u0449\u0435\u0433\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044Fxs \u0444\u0430\u0441\u0435\u0442\u043C\u0438\u043D\u0438\u043C\u0430\u043B\u044C\u043D\u043E\u0439\u0434\u043B\u0438\u043D\u044Bxs \u0444\u0430\u0441\u0435\u0442\u043E\u0431\u0440\u0430\u0437\u0446\u0430xs \u0444\u0430\u0441\u0435\u0442\u043E\u0431\u0449\u0435\u0433\u043E\u043A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u0430\u0440\u0430\u0437\u0440\u044F\u0434\u043E\u0432xs " + "\u0444\u0430\u0441\u0435\u0442\u043F\u0435\u0440\u0435\u0447\u0438\u0441\u043B\u0435\u043D\u0438\u044Fxs \u0444\u0430\u0441\u0435\u0442\u043F\u0440\u043E\u0431\u0435\u043B\u044C\u043D\u044B\u0445\u0441\u0438\u043C\u0432\u043E\u043B\u043E\u0432xs \u0444\u0438\u043B\u044C\u0442\u0440\u0443\u0437\u043B\u043E\u0432dom \u0444\u043E\u0440\u043C\u0430\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u0430\u044F\u0441\u0442\u0440\u043E\u043A\u0430 \u0444\u043E\u0440\u043C\u0430\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439\u0434\u043E\u043A\u0443\u043C\u0435\u043D\u0442 " + "\u0444\u0440\u0430\u0433\u043C\u0435\u043D\u0442xs \u0445\u0435\u0448\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u0435\u0434\u0430\u043D\u043D\u044B\u0445 \u0445\u0440\u0430\u043D\u0438\u043B\u0438\u0449\u0435\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F \u0446\u0432\u0435\u0442 \u0447\u0442\u0435\u043D\u0438\u0435fastinfoset \u0447\u0442\u0435\u043D\u0438\u0435html \u0447\u0442\u0435\u043D\u0438\u0435json \u0447\u0442\u0435\u043D\u0438\u0435xml \u0447\u0442\u0435\u043D\u0438\u0435zip\u0444\u0430\u0439\u043B\u0430 " + "\u0447\u0442\u0435\u043D\u0438\u0435\u0434\u0430\u043D\u043D\u044B\u0445 \u0447\u0442\u0435\u043D\u0438\u0435\u0442\u0435\u043A\u0441\u0442\u0430 \u0447\u0442\u0435\u043D\u0438\u0435\u0443\u0437\u043B\u043E\u0432dom \u0448\u0440\u0438\u0444\u0442 \u044D\u043B\u0435\u043C\u0435\u043D\u0442\u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0430\u043A\u043E\u043C\u043F\u043E\u043D\u043E\u0432\u043A\u0438\u0434\u0430\u043D\u043D\u044B\u0445 ";
-    const v8_universal_collection = "comsafearray \u0434\u0435\u0440\u0435\u0432\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439 \u043C\u0430\u0441\u0441\u0438\u0432 \u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u0435 \u0441\u043F\u0438\u0441\u043E\u043A\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439 \u0441\u0442\u0440\u0443\u043A\u0442\u0443\u0440\u0430 \u0442\u0430\u0431\u043B\u0438\u0446\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0439 \u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u0430\u044F\u0441\u0442\u0440\u0443\u043A\u0442\u0443\u0440\u0430 " + "\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u043E\u0435\u0441\u043E\u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0438\u0435 \u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439\u043C\u0430\u0441\u0441\u0438\u0432 ";
+    const v8_shared_object = "comобъект ftpсоединение httpзапрос httpсервисответ httpсоединение wsопределения wsпрокси xbase анализданных аннотацияxs " + "блокировкаданных буфердвоичныхданных включениеxs выражениекомпоновкиданных генераторслучайныхчисел географическаясхема " + "географическиекоординаты графическаясхема группамоделиxs данныерасшифровкикомпоновкиданных двоичныеданные дендрограмма " + "диаграмма диаграммаганта диалогвыборафайла диалогвыборацвета диалогвыборашрифта диалограсписаниярегламентногозадания " + "диалогредактированиястандартногопериода диапазон документdom документhtml документацияxs доставляемоеуведомление " + "записьdom записьfastinfoset записьhtml записьjson записьxml записьzipфайла записьданных записьтекста записьузловdom " + "запрос защищенноесоединениеopenssl значенияполейрасшифровкикомпоновкиданных извлечениетекста импортxs интернетпочта " + "интернетпочтовоесообщение интернетпочтовыйпрофиль интернетпрокси интернетсоединение информациядляприложенияxs " + "использованиеатрибутаxs использованиесобытияжурналарегистрации источникдоступныхнастроеккомпоновкиданных " + "итераторузловdom картинка квалификаторыдаты квалификаторыдвоичныхданных квалификаторыстроки квалификаторычисла " + "компоновщикмакетакомпоновкиданных компоновщикнастроеккомпоновкиданных конструктормакетаоформлениякомпоновкиданных " + "конструкторнастроеккомпоновкиданных конструкторформатнойстроки линия макеткомпоновкиданных макетобластикомпоновкиданных " + "макетоформлениякомпоновкиданных маскаxs менеджеркриптографии наборсхемxml настройкикомпоновкиданных настройкисериализацииjson " + "обработкакартинок обработкарасшифровкикомпоновкиданных обходдереваdom объявлениеатрибутаxs объявлениенотацииxs " + "объявлениеэлементаxs описаниеиспользованиясобытиядоступжурналарегистрации " + "описаниеиспользованиясобытияотказвдоступежурналарегистрации описаниеобработкирасшифровкикомпоновкиданных " + "описаниепередаваемогофайла описаниетипов определениегруппыатрибутовxs определениегруппымоделиxs " + "определениеограниченияидентичностиxs определениепростоготипаxs определениесоставноготипаxs определениетипадокументаdom " + "определенияxpathxs отборкомпоновкиданных пакетотображаемыхдокументов параметрвыбора параметркомпоновкиданных " + "параметрызаписиjson параметрызаписиxml параметрычтенияxml переопределениеxs планировщик полеанализаданных " + "полекомпоновкиданных построительdom построительзапроса построительотчета построительотчетаанализаданных " + "построительсхемxml поток потоквпамяти почта почтовоесообщение преобразованиеxsl преобразованиекканоническомуxml " + "процессорвыводарезультатакомпоновкиданныхвколлекциюзначений процессорвыводарезультатакомпоновкиданныхвтабличныйдокумент " + "процессоркомпоновкиданных разыменовательпространствименdom рамка расписаниерегламентногозадания расширенноеимяxml " + "результатчтенияданных своднаядиаграмма связьпараметравыбора связьпотипу связьпотипукомпоновкиданных сериализаторxdto " + "сертификатклиентаwindows сертификатклиентафайл сертификаткриптографии сертификатыудостоверяющихцентровwindows " + "сертификатыудостоверяющихцентровфайл сжатиеданных системнаяинформация сообщениепользователю сочетаниеклавиш " + "сравнениезначений стандартнаядатаначала стандартныйпериод схемаxml схемакомпоновкиданных табличныйдокумент " + "текстовыйдокумент тестируемоеприложение типданныхxml уникальныйидентификатор фабрикаxdto файл файловыйпоток " + "фасетдлиныxs фасетколичестваразрядовдробнойчастиxs фасетмаксимальноговключающегозначенияxs " + "фасетмаксимальногоисключающегозначенияxs фасетмаксимальнойдлиныxs фасетминимальноговключающегозначенияxs " + "фасетминимальногоисключающегозначенияxs фасетминимальнойдлиныxs фасетобразцаxs фасетобщегоколичестваразрядовxs " + "фасетперечисленияxs фасетпробельныхсимволовxs фильтрузловdom форматированнаястрока форматированныйдокумент " + "фрагментxs хешированиеданных хранилищезначения цвет чтениеfastinfoset чтениеhtml чтениеjson чтениеxml чтениеzipфайла " + "чтениеданных чтениетекста чтениеузловdom шрифт элементрезультатакомпоновкиданных ";
+    const v8_universal_collection = "comsafearray деревозначений массив соответствие списокзначений структура таблицазначений фиксированнаяструктура " + "фиксированноесоответствие фиксированныймассив ";
     const TYPE = v8_shared_object + v8_universal_collection;
-    const LITERAL = "null \u0438\u0441\u0442\u0438\u043D\u0430 \u043B\u043E\u0436\u044C \u043D\u0435\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0435\u043D\u043E";
+    const LITERAL = "null истина ложь неопределено";
     const NUMBERS = hljs.inherit(hljs.NUMBER_MODE);
     const STRINGS = {
       className: "string",
@@ -1527,13 +1529,13 @@ var require_1c = __commonJS((exports, module) => {
       className: "function",
       variants: [
         {
-          begin: "\u043F\u0440\u043E\u0446\u0435\u0434\u0443\u0440\u0430|\u0444\u0443\u043D\u043A\u0446\u0438\u044F",
+          begin: "процедура|функция",
           end: "\\)",
-          keywords: "\u043F\u0440\u043E\u0446\u0435\u0434\u0443\u0440\u0430 \u0444\u0443\u043D\u043A\u0446\u0438\u044F"
+          keywords: "процедура функция"
         },
         {
-          begin: "\u043A\u043E\u043D\u0435\u0446\u043F\u0440\u043E\u0446\u0435\u0434\u0443\u0440\u044B|\u043A\u043E\u043D\u0435\u0446\u0444\u0443\u043D\u043A\u0446\u0438\u0438",
-          keywords: "\u043A\u043E\u043D\u0435\u0446\u043F\u0440\u043E\u0446\u0435\u0434\u0443\u0440\u044B \u043A\u043E\u043D\u0435\u0446\u0444\u0443\u043D\u043A\u0446\u0438\u0438"
+          begin: "конецпроцедуры|конецфункции",
+          keywords: "конецпроцедуры конецфункции"
         }
       ],
       contains: [
@@ -1550,7 +1552,7 @@ var require_1c = __commonJS((exports, module) => {
               endsWithParent: true,
               keywords: {
                 $pattern: UNDERSCORE_IDENT_RE,
-                keyword: "\u0437\u043D\u0430\u0447",
+                keyword: "знач",
                 literal: LITERAL
               },
               contains: [
@@ -2148,8 +2150,8 @@ var require_angelscript = __commonJS((exports, module) => {
       contains: [
         {
           className: "string",
-          begin: "\'",
-          end: "\'",
+          begin: "'",
+          end: "'",
           illegal: "\\n",
           contains: [hljs.BACKSLASH_ESCAPE],
           relevance: 0
@@ -2286,6 +2288,10 @@ var require_apache = __commonJS((exports, module) => {
             relevance: 0,
             keywords: { literal: "on off all deny allow" },
             contains: [
+              {
+                scope: "punctuation",
+                match: /\\\n/
+              },
               {
                 className: "meta",
                 begin: /\s\[/,
@@ -2442,6 +2448,7 @@ var require_arcade = __commonJS((exports, module) => {
         "import",
         "in",
         "new",
+        "of",
         "return",
         "switch",
         "try",
@@ -2512,6 +2519,7 @@ var require_arcade = __commonJS((exports, module) => {
         "Disjoint",
         "Distance",
         "DistanceGeodetic",
+        "DistanceToCoordinate",
         "Distinct",
         "Domain",
         "DomainCode",
@@ -2523,6 +2531,7 @@ var require_arcade = __commonJS((exports, module) => {
         "Expects",
         "Extent",
         "Feature",
+        "FeatureInFilter",
         "FeatureSet",
         "FeatureSetByAssociation",
         "FeatureSetById",
@@ -2531,6 +2540,7 @@ var require_arcade = __commonJS((exports, module) => {
         "FeatureSetByRelationshipClass",
         "FeatureSetByRelationshipName",
         "Filter",
+        "FilterBySubtypeCode",
         "Find",
         "First|0",
         "Floor",
@@ -2565,6 +2575,7 @@ var require_arcade = __commonJS((exports, module) => {
         "IsNan",
         "IsSelfIntersecting",
         "IsSimple",
+        "KnowledgeGraphByPortalItem",
         "Left|0",
         "Length",
         "Length3D",
@@ -2574,6 +2585,7 @@ var require_arcade = __commonJS((exports, module) => {
         "Map",
         "Max",
         "Mean",
+        "MeasureToCoordinate",
         "Mid",
         "Millisecond",
         "Min",
@@ -2591,6 +2603,7 @@ var require_arcade = __commonJS((exports, module) => {
         "OrderBy",
         "Overlaps",
         "Point",
+        "PointToCoordinate",
         "Polygon",
         "Polyline",
         "Pop",
@@ -2598,6 +2611,7 @@ var require_arcade = __commonJS((exports, module) => {
         "Pow",
         "Proper",
         "Push",
+        "QueryGraph",
         "Random",
         "Reduce",
         "Relate",
@@ -2618,6 +2632,7 @@ var require_arcade = __commonJS((exports, module) => {
         "Splice",
         "Split",
         "Sqrt",
+        "StandardizeFilename",
         "StandardizeGuid",
         "Stdev",
         "SubtypeCode",
@@ -2680,6 +2695,7 @@ var require_arcade = __commonJS((exports, module) => {
       "feedfeature",
       "fencefeature",
       "fencenotificationtype",
+      "graph",
       "join",
       "layer",
       "locationupdate",
@@ -2697,7 +2713,9 @@ var require_arcade = __commonJS((exports, module) => {
       "targetdatastore",
       "targetfeature",
       "targetlayer",
+      "userInput",
       "value",
+      "variables",
       "view"
     ];
     const SYMBOL = {
@@ -2855,8 +2873,8 @@ var require_arduino = __commonJS((exports, module) => {
           contains: [hljs.BACKSLASH_ESCAPE]
         },
         {
-          begin: "(u8?|U|L)?\'(" + CHARACTER_ESCAPES + "|.)",
-          end: "\'",
+          begin: "(u8?|U|L)?'(" + CHARACTER_ESCAPES + "|.)",
+          end: "'",
           illegal: "."
         },
         hljs.END_SAME_AS_BEGIN({
@@ -3021,6 +3039,8 @@ var require_arduino = __commonJS((exports, module) => {
       "counting_semaphore",
       "deque",
       "false_type",
+      "flat_map",
+      "flat_set",
       "future",
       "imaginary",
       "initializer_list",
@@ -3314,7 +3334,7 @@ var require_arduino = __commonJS((exports, module) => {
       contains: [].concat(EXPRESSION_CONTEXT, FUNCTION_DECLARATION, FUNCTION_DISPATCH, EXPRESSION_CONTAINS, [
         PREPROCESSOR,
         {
-          begin: "\\b(deque|list|queue|priority_queue|pair|stack|vector|map|set|bitset|multiset|multimap|unordered_map|unordered_set|unordered_multiset|unordered_multimap|array|tuple|optional|variant|function)\\s*<(?!<)",
+          begin: "\\b(deque|list|queue|priority_queue|pair|stack|vector|map|set|bitset|multiset|multimap|unordered_map|unordered_set|unordered_multiset|unordered_multimap|array|tuple|optional|variant|function|flat_map|flat_set)\\s*<(?!<)",
           end: ">",
           keywords: CPP_KEYWORDS,
           contains: [
@@ -3760,8 +3780,8 @@ var require_armasm = __commonJS((exports, module) => {
         hljs.QUOTE_STRING_MODE,
         {
           className: "string",
-          begin: "\'",
-          end: "[^\\\\]\'",
+          begin: "'",
+          end: "[^\\\\]'",
           relevance: 0
         },
         {
@@ -4015,7 +4035,7 @@ var require_asciidoc = __commonJS((exports, module) => {
   function asciidoc(hljs) {
     const regex = hljs.regex;
     const HORIZONTAL_RULE = {
-      begin: "^\'{3,}[ \\t]*$",
+      begin: "^'{3,}[ \\t]*$",
       relevance: 10
     };
     const ESCAPED_FORMATTING = [
@@ -4064,11 +4084,11 @@ var require_asciidoc = __commonJS((exports, module) => {
       },
       {
         className: "emphasis",
-        begin: "\\B\'(?![\'\\s])",
-        end: "(\\n{2}|\')",
+        begin: "\\B'(?!['\\s])",
+        end: "(\\n{2}|')",
         contains: [
           {
-            begin: "\\\\\'\\w",
+            begin: "\\\\'\\w",
             relevance: 0
           }
         ],
@@ -4655,9 +4675,9 @@ var require_avrasm = __commonJS((exports, module) => {
         hljs.QUOTE_STRING_MODE,
         {
           className: "string",
-          begin: "\'",
-          end: "[^\\\\]\'",
-          illegal: "[^\\\\][^\']"
+          begin: "'",
+          end: "[^\\\\]'",
+          illegal: "[^\\\\][^']"
         },
         {
           className: "symbol",
@@ -4936,7 +4956,7 @@ var require_bash = __commonJS((exports, module) => {
     Object.assign(VAR, {
       className: "variable",
       variants: [
-        { begin: regex.concat(/\$[\w\d#@][\w\d_]*/, `(?![\\w\\d])(?![\$])`) },
+        { begin: regex.concat(/\$[\w\d#@][\w\d_]*/, `(?![\\w\\d])(?![$])`) },
         BRACED_VAR
       ]
     });
@@ -5027,6 +5047,7 @@ var require_bash = __commonJS((exports, module) => {
       "else",
       "elif",
       "fi",
+      "time",
       "for",
       "while",
       "until",
@@ -5035,6 +5056,7 @@ var require_bash = __commonJS((exports, module) => {
       "done",
       "case",
       "esac",
+      "coproc",
       "function",
       "select"
     ];
@@ -5489,9 +5511,14 @@ var require_basic = __commonJS((exports, module) => {
         keyword: KEYWORDS
       },
       contains: [
-        hljs.QUOTE_STRING_MODE,
+        {
+          scope: "string",
+          begin: /"/,
+          end: /"|$/,
+          contains: [hljs.BACKSLASH_ESCAPE]
+        },
         hljs.COMMENT("REM", "$", { relevance: 10 }),
-        hljs.COMMENT("\'", "$", { relevance: 0 }),
+        hljs.COMMENT("'", "$", { relevance: 0 }),
         {
           className: "symbol",
           begin: "^[0-9]+ ",
@@ -5520,7 +5547,7 @@ var require_basic = __commonJS((exports, module) => {
 var require_bnf = __commonJS((exports, module) => {
   function bnf(hljs) {
     return {
-      name: "Backus\u2013Naur Form",
+      name: "Backus–Naur Form",
       contains: [
         {
           className: "attribute",
@@ -5617,8 +5644,8 @@ var require_c = __commonJS((exports, module) => {
           contains: [hljs.BACKSLASH_ESCAPE]
         },
         {
-          begin: "(u8?|U|L)?\'(" + CHARACTER_ESCAPES + "|.)",
-          end: "\'",
+          begin: "(u8?|U|L)?'(" + CHARACTER_ESCAPES + "|.)",
+          end: "'",
           illegal: "."
         },
         hljs.END_SAME_AS_BEGIN({
@@ -5630,9 +5657,10 @@ var require_c = __commonJS((exports, module) => {
     const NUMBERS = {
       className: "number",
       variants: [
-        { begin: "\\b(0b[01\']+)" },
-        { begin: "(-?)\\b([\\d\']+(\\.[\\d\']*)?|\\.[\\d\']+)((ll|LL|l|L)(u|U)?|(u|U)(ll|LL|l|L)?|f|F|b|B)" },
-        { begin: "(-?)(\\b0[xX][a-fA-F0-9\']+|(\\b[\\d\']+(\\.[\\d\']*)?|\\.[\\d\']+)([eE][-+]?[\\d\']+)?)" }
+        { match: /\b(0b[01']+)/ },
+        { match: /(-?)\b([\d']+(\.[\d']*)?|\.[\d']+)((ll|LL|l|L)(u|U)?|(u|U)(ll|LL|l|L)?|f|F|b|B)/ },
+        { match: /(-?)\b(0[xX][a-fA-F0-9]+(?:'[a-fA-F0-9]+)*(?:\.[a-fA-F0-9]*(?:'[a-fA-F0-9]*)*)?(?:[pP][-+]?[0-9]+)?(l|L)?(u|U)?)/ },
+        { match: /(-?)\b\d+(?:'\d+)*(?:\.\d*(?:'\d*)*)?(?:[eE][-+]?\d+)?/ }
       ],
       relevance: 0
     };
@@ -6075,7 +6103,7 @@ var require_capnproto = __commonJS((exports, module) => {
       }
     };
     return {
-      name: "Cap\u2019n Proto",
+      name: "Cap’n Proto",
       aliases: ["capnp"],
       keywords: {
         keyword: KEYWORDS,
@@ -6292,7 +6320,7 @@ var require_clean = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/clojure.js
 var require_clojure = __commonJS((exports, module) => {
   function clojure(hljs) {
-    const SYMBOLSTART = "a-zA-Z_\\-!.?+*=<>&\'";
+    const SYMBOLSTART = "a-zA-Z_\\-!.?+*=<>&'";
     const SYMBOL_RE = "[#]?[" + SYMBOLSTART + "][" + SYMBOLSTART + "0-9/;:$#]*";
     const globals = "def defonce defprotocol defstruct defmulti defmethod defn- defn defmacro deftype defrecord";
     const keywords = {
@@ -6475,6 +6503,126 @@ var require_cmake = __commonJS((exports, module) => {
 
 // node_modules/highlight.js/lib/languages/coffeescript.js
 var require_coffeescript = __commonJS((exports, module) => {
+  var KEYWORDS = [
+    "as",
+    "in",
+    "of",
+    "if",
+    "for",
+    "while",
+    "finally",
+    "var",
+    "new",
+    "function",
+    "do",
+    "return",
+    "void",
+    "else",
+    "break",
+    "catch",
+    "instanceof",
+    "with",
+    "throw",
+    "case",
+    "default",
+    "try",
+    "switch",
+    "continue",
+    "typeof",
+    "delete",
+    "let",
+    "yield",
+    "const",
+    "class",
+    "debugger",
+    "async",
+    "await",
+    "static",
+    "import",
+    "from",
+    "export",
+    "extends",
+    "using"
+  ];
+  var LITERALS = [
+    "true",
+    "false",
+    "null",
+    "undefined",
+    "NaN",
+    "Infinity"
+  ];
+  var TYPES = [
+    "Object",
+    "Function",
+    "Boolean",
+    "Symbol",
+    "Math",
+    "Date",
+    "Number",
+    "BigInt",
+    "String",
+    "RegExp",
+    "Array",
+    "Float32Array",
+    "Float64Array",
+    "Int8Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int16Array",
+    "Int32Array",
+    "Uint16Array",
+    "Uint32Array",
+    "BigInt64Array",
+    "BigUint64Array",
+    "Set",
+    "Map",
+    "WeakSet",
+    "WeakMap",
+    "ArrayBuffer",
+    "SharedArrayBuffer",
+    "Atomics",
+    "DataView",
+    "JSON",
+    "Promise",
+    "Generator",
+    "GeneratorFunction",
+    "AsyncFunction",
+    "Reflect",
+    "Proxy",
+    "Intl",
+    "WebAssembly"
+  ];
+  var ERROR_TYPES = [
+    "Error",
+    "EvalError",
+    "InternalError",
+    "RangeError",
+    "ReferenceError",
+    "SyntaxError",
+    "TypeError",
+    "URIError"
+  ];
+  var BUILT_IN_GLOBALS = [
+    "setInterval",
+    "setTimeout",
+    "clearInterval",
+    "clearTimeout",
+    "require",
+    "exports",
+    "eval",
+    "isFinite",
+    "isNaN",
+    "parseFloat",
+    "parseInt",
+    "decodeURI",
+    "decodeURIComponent",
+    "encodeURI",
+    "encodeURIComponent",
+    "escape",
+    "unescape"
+  ];
+  var BUILT_INS = [].concat(BUILT_IN_GLOBALS, TYPES, ERROR_TYPES);
   function coffeescript(hljs) {
     const COFFEE_BUILT_INS = [
       "npm",
@@ -6677,125 +6825,6 @@ var require_coffeescript = __commonJS((exports, module) => {
       ]
     };
   }
-  var KEYWORDS = [
-    "as",
-    "in",
-    "of",
-    "if",
-    "for",
-    "while",
-    "finally",
-    "var",
-    "new",
-    "function",
-    "do",
-    "return",
-    "void",
-    "else",
-    "break",
-    "catch",
-    "instanceof",
-    "with",
-    "throw",
-    "case",
-    "default",
-    "try",
-    "switch",
-    "continue",
-    "typeof",
-    "delete",
-    "let",
-    "yield",
-    "const",
-    "class",
-    "debugger",
-    "async",
-    "await",
-    "static",
-    "import",
-    "from",
-    "export",
-    "extends"
-  ];
-  var LITERALS = [
-    "true",
-    "false",
-    "null",
-    "undefined",
-    "NaN",
-    "Infinity"
-  ];
-  var TYPES = [
-    "Object",
-    "Function",
-    "Boolean",
-    "Symbol",
-    "Math",
-    "Date",
-    "Number",
-    "BigInt",
-    "String",
-    "RegExp",
-    "Array",
-    "Float32Array",
-    "Float64Array",
-    "Int8Array",
-    "Uint8Array",
-    "Uint8ClampedArray",
-    "Int16Array",
-    "Int32Array",
-    "Uint16Array",
-    "Uint32Array",
-    "BigInt64Array",
-    "BigUint64Array",
-    "Set",
-    "Map",
-    "WeakSet",
-    "WeakMap",
-    "ArrayBuffer",
-    "SharedArrayBuffer",
-    "Atomics",
-    "DataView",
-    "JSON",
-    "Promise",
-    "Generator",
-    "GeneratorFunction",
-    "AsyncFunction",
-    "Reflect",
-    "Proxy",
-    "Intl",
-    "WebAssembly"
-  ];
-  var ERROR_TYPES = [
-    "Error",
-    "EvalError",
-    "InternalError",
-    "RangeError",
-    "ReferenceError",
-    "SyntaxError",
-    "TypeError",
-    "URIError"
-  ];
-  var BUILT_IN_GLOBALS = [
-    "setInterval",
-    "setTimeout",
-    "clearInterval",
-    "clearTimeout",
-    "require",
-    "exports",
-    "eval",
-    "isFinite",
-    "isNaN",
-    "parseFloat",
-    "parseInt",
-    "decodeURI",
-    "decodeURIComponent",
-    "encodeURI",
-    "encodeURIComponent",
-    "escape",
-    "unescape"
-  ];
-  var BUILT_INS = [].concat(BUILT_IN_GLOBALS, TYPES, ERROR_TYPES);
   module.exports = coffeescript;
 });
 
@@ -7251,7 +7280,7 @@ var require_cos = __commonJS((exports, module) => {
           end: '"',
           contains: [
             {
-              begin: "\"\"",
+              begin: '""',
               relevance: 0
             }
           ]
@@ -7265,7 +7294,7 @@ var require_cos = __commonJS((exports, module) => {
     };
     const COS_KEYWORDS = "property parameter class classmethod clientmethod extends as break " + "catch close continue do d|0 else elseif for goto halt hang h|0 if job " + "j|0 kill k|0 lock l|0 merge new open quit q|0 read r|0 return set s|0 " + "tcommit throw trollback try tstart use view while write w|0 xecute x|0 " + "zkill znspace zn ztrap zwrite zw zzdump zzwrite print zbreak zinsert " + "zload zprint zremove zsave zzprint mv mvcall mvcrt mvdim mvprint zquit " + "zsync ascii";
     return {
-      name: "Cach\xE9 Object Script",
+      name: "Caché Object Script",
       case_insensitive: true,
       aliases: ["cls"],
       keywords: COS_KEYWORDS,
@@ -7349,8 +7378,8 @@ var require_cpp = __commonJS((exports, module) => {
           contains: [hljs.BACKSLASH_ESCAPE]
         },
         {
-          begin: "(u8?|U|L)?\'(" + CHARACTER_ESCAPES + "|.)",
-          end: "\'",
+          begin: "(u8?|U|L)?'(" + CHARACTER_ESCAPES + "|.)",
+          end: "'",
           illegal: "."
         },
         hljs.END_SAME_AS_BEGIN({
@@ -7515,6 +7544,8 @@ var require_cpp = __commonJS((exports, module) => {
       "counting_semaphore",
       "deque",
       "false_type",
+      "flat_map",
+      "flat_set",
       "future",
       "imaginary",
       "initializer_list",
@@ -7808,7 +7839,7 @@ var require_cpp = __commonJS((exports, module) => {
       contains: [].concat(EXPRESSION_CONTEXT, FUNCTION_DECLARATION, FUNCTION_DISPATCH, EXPRESSION_CONTAINS, [
         PREPROCESSOR,
         {
-          begin: "\\b(deque|list|queue|priority_queue|pair|stack|vector|map|set|bitset|multiset|multimap|unordered_map|unordered_set|unordered_multiset|unordered_multimap|array|tuple|optional|variant|function)\\s*<(?!<)",
+          begin: "\\b(deque|list|queue|priority_queue|pair|stack|vector|map|set|bitset|multiset|multimap|unordered_map|unordered_set|unordered_multiset|unordered_multimap|array|tuple|optional|variant|function|flat_map|flat_set)\\s*<(?!<)",
           end: ">",
           keywords: CPP_KEYWORDS,
           contains: [
@@ -7947,7 +7978,7 @@ var require_crystal = __commonJS((exports, module) => {
     };
     const VARIABLE = {
       className: "variable",
-      begin: "(\\$\\W)|((\\$|@@?)(\\w+))(?=[^@$?])" + `(?![A-Za-z])(?![@\$?'])`
+      begin: "(\\$\\W)|((\\$|@@?)(\\w+))(?=[^@$?])" + `(?![A-Za-z])(?![@$?'])`
     };
     const EXPANSION = {
       className: "template-variable",
@@ -8336,11 +8367,14 @@ var require_csharp = __commonJS((exports, module) => {
       "alias",
       "and",
       "ascending",
+      "args",
       "async",
       "await",
       "by",
       "descending",
+      "dynamic",
       "equals",
+      "file",
       "from",
       "get",
       "global",
@@ -8356,7 +8390,10 @@ var require_csharp = __commonJS((exports, module) => {
       "or",
       "orderby",
       "partial",
+      "record",
       "remove",
+      "required",
+      "scoped",
       "select",
       "set",
       "unmanaged",
@@ -8376,9 +8413,9 @@ var require_csharp = __commonJS((exports, module) => {
     const NUMBERS = {
       className: "number",
       variants: [
-        { begin: "\\b(0b[01\']+)" },
-        { begin: "(-?)\\b([\\d\']+(\\.[\\d\']*)?|\\.[\\d\']+)(u|U|l|L|ul|UL|f|F|b|B)" },
-        { begin: "(-?)(\\b0[xX][a-fA-F0-9\']+|(\\b[\\d\']+(\\.[\\d\']*)?|\\.[\\d\']+)([eE][-+]?[\\d\']+)?)" }
+        { begin: "\\b(0b[01']+)" },
+        { begin: "(-?)\\b([\\d']+(\\.[\\d']*)?|\\.[\\d']+)(u|U|l|L|ul|UL|f|F|b|B)" },
+        { begin: "(-?)(\\b0[xX][a-fA-F0-9']+|(\\b[\\d']+(\\.[\\d']*)?|\\.[\\d']+)([eE][-+]?[\\d']+)?)" }
       ],
       relevance: 0
     };
@@ -8663,117 +8700,6 @@ var require_csp = __commonJS((exports, module) => {
 
 // node_modules/highlight.js/lib/languages/css.js
 var require_css = __commonJS((exports, module) => {
-  function css(hljs) {
-    const regex = hljs.regex;
-    const modes = MODES(hljs);
-    const VENDOR_PREFIX = { begin: /-(webkit|moz|ms|o)-(?=[a-z])/ };
-    const AT_MODIFIERS = "and or not only";
-    const AT_PROPERTY_RE = /@-?\w[\w]*(-\w+)*/;
-    const IDENT_RE = "[a-zA-Z-][a-zA-Z0-9_-]*";
-    const STRINGS = [
-      hljs.APOS_STRING_MODE,
-      hljs.QUOTE_STRING_MODE
-    ];
-    return {
-      name: "CSS",
-      case_insensitive: true,
-      illegal: /[=|'\$]/,
-      keywords: { keyframePosition: "from to" },
-      classNameAliases: {
-        keyframePosition: "selector-tag"
-      },
-      contains: [
-        modes.BLOCK_COMMENT,
-        VENDOR_PREFIX,
-        modes.CSS_NUMBER_MODE,
-        {
-          className: "selector-id",
-          begin: /#[A-Za-z0-9_-]+/,
-          relevance: 0
-        },
-        {
-          className: "selector-class",
-          begin: "\\." + IDENT_RE,
-          relevance: 0
-        },
-        modes.ATTRIBUTE_SELECTOR_MODE,
-        {
-          className: "selector-pseudo",
-          variants: [
-            { begin: ":(" + PSEUDO_CLASSES.join("|") + ")" },
-            { begin: ":(:)?(" + PSEUDO_ELEMENTS.join("|") + ")" }
-          ]
-        },
-        modes.CSS_VARIABLE,
-        {
-          className: "attribute",
-          begin: "\\b(" + ATTRIBUTES.join("|") + ")\\b"
-        },
-        {
-          begin: /:/,
-          end: /[;}{]/,
-          contains: [
-            modes.BLOCK_COMMENT,
-            modes.HEXCOLOR,
-            modes.IMPORTANT,
-            modes.CSS_NUMBER_MODE,
-            ...STRINGS,
-            {
-              begin: /(url|data-uri)\(/,
-              end: /\)/,
-              relevance: 0,
-              keywords: { built_in: "url data-uri" },
-              contains: [
-                ...STRINGS,
-                {
-                  className: "string",
-                  begin: /[^)]/,
-                  endsWithParent: true,
-                  excludeEnd: true
-                }
-              ]
-            },
-            modes.FUNCTION_DISPATCH
-          ]
-        },
-        {
-          begin: regex.lookahead(/@/),
-          end: "[{;]",
-          relevance: 0,
-          illegal: /:/,
-          contains: [
-            {
-              className: "keyword",
-              begin: AT_PROPERTY_RE
-            },
-            {
-              begin: /\s/,
-              endsWithParent: true,
-              excludeEnd: true,
-              relevance: 0,
-              keywords: {
-                $pattern: /[a-z-]+/,
-                keyword: AT_MODIFIERS,
-                attribute: MEDIA_FEATURES.join(" ")
-              },
-              contains: [
-                {
-                  begin: /[a-z-]+(?=:)/,
-                  className: "attribute"
-                },
-                ...STRINGS,
-                modes.CSS_NUMBER_MODE
-              ]
-            }
-          ]
-        },
-        {
-          className: "selector-tag",
-          begin: "\\b(" + TAGS.join("|") + ")\\b"
-        }
-      ]
-    };
-  }
   var MODES = (hljs) => {
     return {
       IMPORTANT: {
@@ -9055,7 +8981,9 @@ var require_css = __commonJS((exports, module) => {
     "align-self",
     "alignment-baseline",
     "all",
+    "anchor-name",
     "animation",
+    "animation-composition",
     "animation-delay",
     "animation-direction",
     "animation-duration",
@@ -9063,8 +8991,14 @@ var require_css = __commonJS((exports, module) => {
     "animation-iteration-count",
     "animation-name",
     "animation-play-state",
+    "animation-range",
+    "animation-range-end",
+    "animation-range-start",
+    "animation-timeline",
     "animation-timing-function",
     "appearance",
+    "aspect-ratio",
+    "backdrop-filter",
     "backface-visibility",
     "background",
     "background-attachment",
@@ -9074,6 +9008,8 @@ var require_css = __commonJS((exports, module) => {
     "background-image",
     "background-origin",
     "background-position",
+    "background-position-x",
+    "background-position-y",
     "background-repeat",
     "background-size",
     "baseline-shift",
@@ -9099,6 +9035,8 @@ var require_css = __commonJS((exports, module) => {
     "border-bottom-width",
     "border-collapse",
     "border-color",
+    "border-end-end-radius",
+    "border-end-start-radius",
     "border-image",
     "border-image-outset",
     "border-image-repeat",
@@ -9123,8 +9061,6 @@ var require_css = __commonJS((exports, module) => {
     "border-left-width",
     "border-radius",
     "border-right",
-    "border-end-end-radius",
-    "border-end-start-radius",
     "border-right-color",
     "border-right-style",
     "border-right-width",
@@ -9140,14 +9076,20 @@ var require_css = __commonJS((exports, module) => {
     "border-top-width",
     "border-width",
     "bottom",
+    "box-align",
     "box-decoration-break",
+    "box-direction",
+    "box-flex",
+    "box-flex-group",
+    "box-lines",
+    "box-ordinal-group",
+    "box-orient",
+    "box-pack",
     "box-shadow",
     "box-sizing",
     "break-after",
     "break-before",
     "break-inside",
-    "cx",
-    "cy",
     "caption-side",
     "caret-color",
     "clear",
@@ -9171,19 +9113,31 @@ var require_css = __commonJS((exports, module) => {
     "column-width",
     "columns",
     "contain",
+    "contain-intrinsic-block-size",
+    "contain-intrinsic-height",
+    "contain-intrinsic-inline-size",
+    "contain-intrinsic-size",
+    "contain-intrinsic-width",
+    "container",
+    "container-name",
+    "container-type",
     "content",
     "content-visibility",
     "counter-increment",
     "counter-reset",
+    "counter-set",
     "cue",
     "cue-after",
     "cue-before",
     "cursor",
+    "cx",
+    "cy",
     "direction",
     "display",
     "dominant-baseline",
     "empty-cells",
     "enable-background",
+    "field-sizing",
     "fill",
     "fill-opacity",
     "fill-rule",
@@ -9196,29 +9150,39 @@ var require_css = __commonJS((exports, module) => {
     "flex-shrink",
     "flex-wrap",
     "float",
-    "flow",
     "flood-color",
     "flood-opacity",
+    "flow",
     "font",
     "font-display",
     "font-family",
     "font-feature-settings",
     "font-kerning",
     "font-language-override",
+    "font-optical-sizing",
+    "font-palette",
     "font-size",
     "font-size-adjust",
+    "font-smooth",
     "font-smoothing",
     "font-stretch",
     "font-style",
     "font-synthesis",
+    "font-synthesis-position",
+    "font-synthesis-small-caps",
+    "font-synthesis-style",
+    "font-synthesis-weight",
     "font-variant",
+    "font-variant-alternates",
     "font-variant-caps",
     "font-variant-east-asian",
+    "font-variant-emoji",
     "font-variant-ligatures",
     "font-variant-numeric",
     "font-variant-position",
     "font-variation-settings",
     "font-weight",
+    "forced-color-adjust",
     "gap",
     "glyph-orientation-horizontal",
     "glyph-orientation-vertical",
@@ -9240,14 +9204,19 @@ var require_css = __commonJS((exports, module) => {
     "grid-template-rows",
     "hanging-punctuation",
     "height",
+    "hyphenate-character",
+    "hyphenate-limit-chars",
     "hyphens",
     "icon",
     "image-orientation",
     "image-rendering",
     "image-resolution",
     "ime-mode",
+    "initial-letter",
+    "initial-letter-align",
     "inline-size",
     "inset",
+    "inset-area",
     "inset-block",
     "inset-block-end",
     "inset-block-start",
@@ -9255,24 +9224,20 @@ var require_css = __commonJS((exports, module) => {
     "inset-inline-end",
     "inset-inline-start",
     "isolation",
-    "kerning",
     "justify-content",
     "justify-items",
     "justify-self",
+    "kerning",
     "left",
     "letter-spacing",
     "lighting-color",
     "line-break",
     "line-height",
+    "line-height-step",
     "list-style",
     "list-style-image",
     "list-style-position",
     "list-style-type",
-    "marker",
-    "marker-end",
-    "marker-mid",
-    "marker-start",
-    "mask",
     "margin",
     "margin-block",
     "margin-block-end",
@@ -9284,6 +9249,11 @@ var require_css = __commonJS((exports, module) => {
     "margin-left",
     "margin-right",
     "margin-top",
+    "margin-trim",
+    "marker",
+    "marker-end",
+    "marker-mid",
+    "marker-start",
     "marks",
     "mask",
     "mask-border",
@@ -9302,6 +9272,10 @@ var require_css = __commonJS((exports, module) => {
     "mask-repeat",
     "mask-size",
     "mask-type",
+    "masonry-auto-flow",
+    "math-depth",
+    "math-shift",
+    "math-style",
     "max-block-size",
     "max-height",
     "max-inline-size",
@@ -9320,6 +9294,12 @@ var require_css = __commonJS((exports, module) => {
     "normal",
     "object-fit",
     "object-position",
+    "offset",
+    "offset-anchor",
+    "offset-distance",
+    "offset-path",
+    "offset-position",
+    "offset-rotate",
     "opacity",
     "order",
     "orphans",
@@ -9329,9 +9309,19 @@ var require_css = __commonJS((exports, module) => {
     "outline-style",
     "outline-width",
     "overflow",
+    "overflow-anchor",
+    "overflow-block",
+    "overflow-clip-margin",
+    "overflow-inline",
     "overflow-wrap",
     "overflow-x",
     "overflow-y",
+    "overlay",
+    "overscroll-behavior",
+    "overscroll-behavior-block",
+    "overscroll-behavior-inline",
+    "overscroll-behavior-x",
+    "overscroll-behavior-y",
     "padding",
     "padding-block",
     "padding-block-end",
@@ -9343,16 +9333,24 @@ var require_css = __commonJS((exports, module) => {
     "padding-left",
     "padding-right",
     "padding-top",
+    "page",
     "page-break-after",
     "page-break-before",
     "page-break-inside",
+    "paint-order",
     "pause",
     "pause-after",
     "pause-before",
     "perspective",
     "perspective-origin",
+    "place-content",
+    "place-items",
+    "place-self",
     "pointer-events",
     "position",
+    "position-anchor",
+    "position-visibility",
+    "print-color-adjust",
     "quotes",
     "r",
     "resize",
@@ -9362,7 +9360,10 @@ var require_css = __commonJS((exports, module) => {
     "right",
     "rotate",
     "row-gap",
+    "ruby-align",
+    "ruby-position",
     "scale",
+    "scroll-behavior",
     "scroll-margin",
     "scroll-margin-block",
     "scroll-margin-block-end",
@@ -9388,6 +9389,9 @@ var require_css = __commonJS((exports, module) => {
     "scroll-snap-align",
     "scroll-snap-stop",
     "scroll-snap-type",
+    "scroll-timeline",
+    "scroll-timeline-axis",
+    "scroll-timeline-name",
     "scrollbar-color",
     "scrollbar-gutter",
     "scrollbar-width",
@@ -9395,6 +9399,9 @@ var require_css = __commonJS((exports, module) => {
     "shape-margin",
     "shape-outside",
     "shape-rendering",
+    "speak",
+    "speak-as",
+    "src",
     "stop-color",
     "stop-opacity",
     "stroke",
@@ -9405,19 +9412,17 @@ var require_css = __commonJS((exports, module) => {
     "stroke-miterlimit",
     "stroke-opacity",
     "stroke-width",
-    "speak",
-    "speak-as",
-    "src",
     "tab-size",
     "table-layout",
-    "text-anchor",
     "text-align",
     "text-align-all",
     "text-align-last",
+    "text-anchor",
     "text-combine-upright",
     "text-decoration",
     "text-decoration-color",
     "text-decoration-line",
+    "text-decoration-skip",
     "text-decoration-skip-ink",
     "text-decoration-style",
     "text-decoration-thickness",
@@ -9431,23 +9436,37 @@ var require_css = __commonJS((exports, module) => {
     "text-overflow",
     "text-rendering",
     "text-shadow",
+    "text-size-adjust",
     "text-transform",
     "text-underline-offset",
     "text-underline-position",
+    "text-wrap",
+    "text-wrap-mode",
+    "text-wrap-style",
+    "timeline-scope",
     "top",
+    "touch-action",
     "transform",
     "transform-box",
     "transform-origin",
     "transform-style",
     "transition",
+    "transition-behavior",
     "transition-delay",
     "transition-duration",
     "transition-property",
     "transition-timing-function",
     "translate",
     "unicode-bidi",
+    "user-modify",
+    "user-select",
     "vector-effect",
     "vertical-align",
+    "view-timeline",
+    "view-timeline-axis",
+    "view-timeline-inset",
+    "view-timeline-name",
+    "view-transition-name",
     "visibility",
     "voice-balance",
     "voice-duration",
@@ -9458,6 +9477,7 @@ var require_css = __commonJS((exports, module) => {
     "voice-stress",
     "voice-volume",
     "white-space",
+    "white-space-collapse",
     "widows",
     "width",
     "will-change",
@@ -9467,8 +9487,120 @@ var require_css = __commonJS((exports, module) => {
     "writing-mode",
     "x",
     "y",
-    "z-index"
+    "z-index",
+    "zoom"
   ].sort().reverse();
+  function css(hljs) {
+    const regex = hljs.regex;
+    const modes = MODES(hljs);
+    const VENDOR_PREFIX = { begin: /-(webkit|moz|ms|o)-(?=[a-z])/ };
+    const AT_MODIFIERS = "and or not only";
+    const AT_PROPERTY_RE = /@-?\w[\w]*(-\w+)*/;
+    const IDENT_RE = "[a-zA-Z-][a-zA-Z0-9_-]*";
+    const STRINGS = [
+      hljs.APOS_STRING_MODE,
+      hljs.QUOTE_STRING_MODE
+    ];
+    return {
+      name: "CSS",
+      case_insensitive: true,
+      illegal: /[=|'\$]/,
+      keywords: { keyframePosition: "from to" },
+      classNameAliases: {
+        keyframePosition: "selector-tag"
+      },
+      contains: [
+        modes.BLOCK_COMMENT,
+        VENDOR_PREFIX,
+        modes.CSS_NUMBER_MODE,
+        {
+          className: "selector-id",
+          begin: /#[A-Za-z0-9_-]+/,
+          relevance: 0
+        },
+        {
+          className: "selector-class",
+          begin: "\\." + IDENT_RE,
+          relevance: 0
+        },
+        modes.ATTRIBUTE_SELECTOR_MODE,
+        {
+          className: "selector-pseudo",
+          variants: [
+            { begin: ":(" + PSEUDO_CLASSES.join("|") + ")" },
+            { begin: ":(:)?(" + PSEUDO_ELEMENTS.join("|") + ")" }
+          ]
+        },
+        modes.CSS_VARIABLE,
+        {
+          className: "attribute",
+          begin: "\\b(" + ATTRIBUTES.join("|") + ")\\b"
+        },
+        {
+          begin: /:/,
+          end: /[;}{]/,
+          contains: [
+            modes.BLOCK_COMMENT,
+            modes.HEXCOLOR,
+            modes.IMPORTANT,
+            modes.CSS_NUMBER_MODE,
+            ...STRINGS,
+            {
+              begin: /(url|data-uri)\(/,
+              end: /\)/,
+              relevance: 0,
+              keywords: { built_in: "url data-uri" },
+              contains: [
+                ...STRINGS,
+                {
+                  className: "string",
+                  begin: /[^)]/,
+                  endsWithParent: true,
+                  excludeEnd: true
+                }
+              ]
+            },
+            modes.FUNCTION_DISPATCH
+          ]
+        },
+        {
+          begin: regex.lookahead(/@/),
+          end: "[{;]",
+          relevance: 0,
+          illegal: /:/,
+          contains: [
+            {
+              className: "keyword",
+              begin: AT_PROPERTY_RE
+            },
+            {
+              begin: /\s/,
+              endsWithParent: true,
+              excludeEnd: true,
+              relevance: 0,
+              keywords: {
+                $pattern: /[a-z-]+/,
+                keyword: AT_MODIFIERS,
+                attribute: MEDIA_FEATURES.join(" ")
+              },
+              contains: [
+                {
+                  begin: /[a-z-]+(?=:)/,
+                  className: "attribute"
+                },
+                ...STRINGS,
+                modes.CSS_NUMBER_MODE
+              ]
+            }
+          ]
+        },
+        {
+          className: "selector-tag",
+          begin: "\\b(" + TAGS.join("|") + ")\\b"
+        }
+      ]
+    };
+  }
   module.exports = css;
 });
 
@@ -9491,7 +9623,7 @@ var require_d = __commonJS((exports, module) => {
     const hexadecimal_float_re = "(0[xX](" + hexadecimal_digits_re + "\\." + hexadecimal_digits_re + "|" + "\\.?" + hexadecimal_digits_re + ")[pP][+-]?" + decimal_integer_nosus_re + ")";
     const integer_re = "(" + decimal_integer_re + "|" + binary_integer_re + "|" + hexadecimal_integer_re + ")";
     const float_re = "(" + hexadecimal_float_re + "|" + decimal_float_re + ")";
-    const escape_sequence_re = "\\\\(" + '[\'"\\?\\\\abfnrtv]|' + "u[\\dA-Fa-f]{4}|" + "[0-7]{1,3}|" + "x[\\dA-Fa-f]{2}|" + "U[\\dA-Fa-f]{8}" + ")|" + "&[a-zA-Z\\d]{2,};";
+    const escape_sequence_re = "\\\\(" + `['"\\?\\\\abfnrtv]|` + "u[\\dA-Fa-f]{4}|" + "[0-7]{1,3}|" + "x[\\dA-Fa-f]{2}|" + "U[\\dA-Fa-f]{8}" + ")|" + "&[a-zA-Z\\d]{2,};";
     const D_INTEGER_MODE = {
       className: "number",
       begin: "\\b" + integer_re + "(L|u|U|Lu|LU|uL|UL)?",
@@ -9504,8 +9636,8 @@ var require_d = __commonJS((exports, module) => {
     };
     const D_CHARACTER_MODE = {
       className: "string",
-      begin: "\'(" + escape_sequence_re + "|.)",
-      end: "\'",
+      begin: "'(" + escape_sequence_re + "|.)",
+      end: "'",
       illegal: "."
     };
     const D_ESCAPE_SEQUENCE = {
@@ -9822,20 +9954,28 @@ var require_dart = __commonJS((exports, module) => {
       ],
       keywords: "true false null this is new super"
     };
+    const NUMBER = {
+      className: "number",
+      relevance: 0,
+      variants: [
+        { match: /\b[0-9][0-9_]*(\.[0-9][0-9_]*)?([eE][+-]?[0-9][0-9_]*)?\b/ },
+        { match: /\b0[xX][0-9A-Fa-f][0-9A-Fa-f_]*\b/ }
+      ]
+    };
     const STRING = {
       className: "string",
       variants: [
         {
-          begin: "r\'\'\'",
-          end: "\'\'\'"
+          begin: "r'''",
+          end: "'''"
         },
         {
           begin: 'r"""',
           end: '"""'
         },
         {
-          begin: "r\'",
-          end: "\'",
+          begin: "r'",
+          end: "'",
           illegal: "\\n"
         },
         {
@@ -9844,8 +9984,8 @@ var require_dart = __commonJS((exports, module) => {
           illegal: "\\n"
         },
         {
-          begin: "\'\'\'",
-          end: "\'\'\'",
+          begin: "'''",
+          end: "'''",
           contains: [
             hljs.BACKSLASH_ESCAPE,
             SUBST,
@@ -9862,8 +10002,8 @@ var require_dart = __commonJS((exports, module) => {
           ]
         },
         {
-          begin: "\'",
-          end: "\'",
+          begin: "'",
+          end: "'",
           illegal: "\\n",
           contains: [
             hljs.BACKSLASH_ESCAPE,
@@ -9884,7 +10024,7 @@ var require_dart = __commonJS((exports, module) => {
       ]
     };
     BRACED_SUBST.contains = [
-      hljs.C_NUMBER_MODE,
+      NUMBER,
       STRING
     ];
     const BUILT_IN_TYPES = [
@@ -10027,7 +10167,7 @@ var require_dart = __commonJS((exports, module) => {
             hljs.UNDERSCORE_TITLE_MODE
           ]
         },
-        hljs.C_NUMBER_MODE,
+        NUMBER,
         {
           className: "meta",
           begin: "@[A-Za-z]+"
@@ -10713,8 +10853,8 @@ var require_dts = __commonJS((exports, module) => {
           contains: [hljs.BACKSLASH_ESCAPE]
         },
         {
-          begin: "\'\\\\?.",
-          end: "\'",
+          begin: "'\\\\?.",
+          end: "'",
           illegal: "."
         }
       ]
@@ -10987,7 +11127,7 @@ var require_elixir = __commonJS((exports, module) => {
       scope: "char.escape",
       relevance: 0
     };
-    const SIGIL_DELIMITERS = '[/|([{<"\']';
+    const SIGIL_DELIMITERS = `[/|([{<"']`;
     const SIGIL_DELIMITER_MODES = [
       {
         begin: /"/,
@@ -11184,7 +11324,7 @@ var require_elm = __commonJS((exports, module) => {
     ] };
     const CONSTRUCTOR = {
       className: "type",
-      begin: "\\b[A-Z][\\w\']*",
+      begin: "\\b[A-Z][\\w']*",
       relevance: 0
     };
     const LIST = {
@@ -11206,8 +11346,8 @@ var require_elm = __commonJS((exports, module) => {
     };
     const CHARACTER = {
       className: "string",
-      begin: "\'\\\\?.",
-      end: "\'",
+      begin: "'\\\\?.",
+      end: "'",
       illegal: "."
     };
     const KEYWORDS = [
@@ -11286,7 +11426,7 @@ var require_elm = __commonJS((exports, module) => {
         hljs.QUOTE_STRING_MODE,
         hljs.C_NUMBER_MODE,
         CONSTRUCTOR,
-        hljs.inherit(hljs.TITLE_MODE, { begin: "^[_a-z][\\w\']*" }),
+        hljs.inherit(hljs.TITLE_MODE, { begin: "^[_a-z][\\w']*" }),
         COMMENT,
         {
           begin: "->|<-"
@@ -11595,11 +11735,11 @@ var require_ruby = __commonJS((exports, module) => {
       NUMBER,
       {
         className: "variable",
-        begin: "(\\$\\W)|((\\$|@@?)(\\w+))(?=[^@$?])" + `(?![A-Za-z])(?![@\$?'])`
+        begin: "(\\$\\W)|((\\$|@@?)(\\w+))(?=[^@$?])" + `(?![A-Za-z])(?![@$?'])`
       },
       {
         className: "params",
-        begin: /\|/,
+        begin: /\|(?!=)/,
         end: /\|/,
         excludeBegin: true,
         excludeEnd: true,
@@ -11735,11 +11875,11 @@ var require_erlang_repl = __commonJS((exports, module) => {
         { begin: "ok" },
         { begin: "!" },
         {
-          begin: "(\\b[a-z\'][a-zA-Z0-9_\']*:[a-z\'][a-zA-Z0-9_\']*)|(\\b[a-z\'][a-zA-Z0-9_\']*)",
+          begin: "(\\b[a-z'][a-zA-Z0-9_']*:[a-z'][a-zA-Z0-9_']*)|(\\b[a-z'][a-zA-Z0-9_']*)",
           relevance: 0
         },
         {
-          begin: "[A-Z][a-zA-Z0-9_\']*",
+          begin: "[A-Z][a-zA-Z0-9_']*",
           relevance: 0
         }
       ]
@@ -11751,10 +11891,10 @@ var require_erlang_repl = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/erlang.js
 var require_erlang = __commonJS((exports, module) => {
   function erlang(hljs) {
-    const BASIC_ATOM_RE = "[a-z\'][a-zA-Z0-9_\']*";
+    const BASIC_ATOM_RE = "[a-z'][a-zA-Z0-9_']*";
     const FUNCTION_NAME_RE = "(" + BASIC_ATOM_RE + ":" + BASIC_ATOM_RE + "|" + BASIC_ATOM_RE + ")";
     const ERLANG_RESERVED = {
-      keyword: "after and andalso|10 band begin bnot bor bsl bzr bxor case catch cond div end fun if " + "let not of orelse|10 query receive rem try when xor",
+      keyword: "after and andalso|10 band begin bnot bor bsl bzr bxor case catch cond div end fun if " + "let not of orelse|10 query receive rem try when xor maybe else",
       literal: "false true"
     };
     const COMMENT = hljs.COMMENT("%", "$");
@@ -11816,8 +11956,29 @@ var require_erlang = __commonJS((exports, module) => {
       scope: "string",
       match: /\$(\\([^0-9]|[0-9]{1,3}|)|.)/
     };
+    const TRIPLE_QUOTE = {
+      scope: "string",
+      match: /"""("*)(?!")[\s\S]*?"""\1/
+    };
+    const SIGIL = {
+      scope: "string",
+      contains: [hljs.BACKSLASH_ESCAPE],
+      variants: [
+        { match: /~\w?"""("*)(?!")[\s\S]*?"""\1/ },
+        { begin: /~\w?\(/, end: /\)/ },
+        { begin: /~\w?\[/, end: /\]/ },
+        { begin: /~\w?{/, end: /}/ },
+        { begin: /~\w?</, end: />/ },
+        { begin: /~\w?\//, end: /\// },
+        { begin: /~\w?\|/, end: /\|/ },
+        { begin: /~\w?'/, end: /'/ },
+        { begin: /~\w?"/, end: /"/ },
+        { begin: /~\w?`/, end: /`/ },
+        { begin: /~\w?#/, end: /#/ }
+      ]
+    };
     const BLOCK_STATEMENTS = {
-      beginKeywords: "fun receive if try case",
+      beginKeywords: "fun receive if try case maybe",
       end: "end",
       keywords: ERLANG_RESERVED
     };
@@ -11827,6 +11988,8 @@ var require_erlang = __commonJS((exports, module) => {
       hljs.inherit(hljs.APOS_STRING_MODE, { className: "" }),
       BLOCK_STATEMENTS,
       FUNCTION_CALL,
+      SIGIL,
+      TRIPLE_QUOTE,
       hljs.QUOTE_STRING_MODE,
       NUMBER,
       TUPLE,
@@ -11840,6 +12003,8 @@ var require_erlang = __commonJS((exports, module) => {
       NAMED_FUN,
       BLOCK_STATEMENTS,
       FUNCTION_CALL,
+      SIGIL,
+      TRIPLE_QUOTE,
       hljs.QUOTE_STRING_MODE,
       NUMBER,
       TUPLE,
@@ -11861,6 +12026,7 @@ var require_erlang = __commonJS((exports, module) => {
       "-author",
       "-copyright",
       "-doc",
+      "-moduledoc",
       "-vsn",
       "-import",
       "-include",
@@ -11872,7 +12038,9 @@ var require_erlang = __commonJS((exports, module) => {
       "-file",
       "-behaviour",
       "-behavior",
-      "-spec"
+      "-spec",
+      "-on_load",
+      "-nifs"
     ];
     const PARAMS = {
       className: "params",
@@ -11913,9 +12081,16 @@ var require_erlang = __commonJS((exports, module) => {
             $pattern: "-" + hljs.IDENT_RE,
             keyword: DIRECTIVES.map((x) => `${x}|1.5`).join(" ")
           },
-          contains: [PARAMS]
+          contains: [
+            PARAMS,
+            SIGIL,
+            TRIPLE_QUOTE,
+            hljs.QUOTE_STRING_MODE
+          ]
         },
         NUMBER,
+        SIGIL,
+        TRIPLE_QUOTE,
         hljs.QUOTE_STRING_MODE,
         RECORD_ACCESS,
         VAR1,
@@ -11947,6 +12122,7 @@ var require_excel = __commonJS((exports, module) => {
       "AND",
       "ARABIC",
       "AREAS",
+      "ARRAYTOTEXT",
       "ASC",
       "ASIN",
       "ASINH",
@@ -11980,6 +12156,8 @@ var require_excel = __commonJS((exports, module) => {
       "BITOR",
       "BITRSHIFT",
       "BITXOR",
+      "BYCOL",
+      "BYROW",
       "CALL",
       "CEILING",
       "CEILING.MATH",
@@ -11995,6 +12173,8 @@ var require_excel = __commonJS((exports, module) => {
       "CHISQ.INV.RT",
       "CHISQ.TEST",
       "CHOOSE",
+      "CHOOSECOLS",
+      "CHOOSEROWS",
       "CLEAN",
       "CODE",
       "COLUMN",
@@ -12066,6 +12246,7 @@ var require_excel = __commonJS((exports, module) => {
       "DOLLARDE",
       "DOLLARFR",
       "DPRODUCT",
+      "DROP",
       "DSTDEV",
       "DSTDEVP",
       "DSUM",
@@ -12085,14 +12266,16 @@ var require_excel = __commonJS((exports, module) => {
       "EVEN",
       "EXACT",
       "EXP",
+      "EXPAND",
       "EXPON.DIST",
       "EXPONDIST",
       "FACT",
       "FACTDOUBLE",
-      "FALSE|0",
+      "FALSE",
       "F.DIST",
       "FDIST",
       "F.DIST.RT",
+      "FILTER",
       "FILTERXML",
       "FIND",
       "FINDB",
@@ -12136,6 +12319,7 @@ var require_excel = __commonJS((exports, module) => {
       "HEX2OCT",
       "HLOOKUP",
       "HOUR",
+      "HSTACK",
       "HYPERLINK",
       "HYPGEOM.DIST",
       "HYPGEOMDIST",
@@ -12144,6 +12328,7 @@ var require_excel = __commonJS((exports, module) => {
       "IFNA",
       "IFS",
       "IMABS",
+      "IMAGE",
       "IMAGINARY",
       "IMARGUMENT",
       "IMCONJUGATE",
@@ -12186,6 +12371,7 @@ var require_excel = __commonJS((exports, module) => {
       "ISNONTEXT",
       "ISNUMBER",
       "ISODD",
+      "ISOMITTED",
       "ISREF",
       "ISTEXT",
       "ISO.CEILING",
@@ -12193,12 +12379,14 @@ var require_excel = __commonJS((exports, module) => {
       "ISPMT",
       "JIS",
       "KURT",
+      "LAMBDA",
       "LARGE",
       "LCM",
       "LEFT",
       "LEFTB",
       "LEN",
       "LENB",
+      "LET",
       "LINEST",
       "LN",
       "LOG",
@@ -12210,6 +12398,8 @@ var require_excel = __commonJS((exports, module) => {
       "LOGNORM.INV",
       "LOOKUP",
       "LOWER",
+      "MAKEARRAY",
+      "MAP",
       "MATCH",
       "MAX",
       "MAXA",
@@ -12218,7 +12408,7 @@ var require_excel = __commonJS((exports, module) => {
       "MDURATION",
       "MEDIAN",
       "MID",
-      "MIDBs",
+      "MIDB",
       "MIN",
       "MINIFS",
       "MINA",
@@ -12295,12 +12485,14 @@ var require_excel = __commonJS((exports, module) => {
       "QUOTIENT",
       "RADIANS",
       "RAND",
+      "RANDARRAY",
       "RANDBETWEEN",
       "RANK.AVG",
       "RANK.EQ",
       "RANK",
       "RATE",
       "RECEIVED",
+      "REDUCE",
       "REGISTER.ID",
       "REPLACE",
       "REPLACEB",
@@ -12316,11 +12508,13 @@ var require_excel = __commonJS((exports, module) => {
       "RRI",
       "RSQ",
       "RTD",
+      "SCAN",
       "SEARCH",
       "SEARCHB",
       "SEC",
       "SECH",
       "SECOND",
+      "SEQUENCE",
       "SERIESSUM",
       "SHEET",
       "SHEETS",
@@ -12332,10 +12526,13 @@ var require_excel = __commonJS((exports, module) => {
       "SLN",
       "SLOPE",
       "SMALL",
-      "SQL.REQUEST",
+      "SORT",
+      "SORTBY",
       "SQRT",
       "SQRTPI",
+      "SQL.REQUEST",
       "STANDARDIZE",
+      "STOCKHISTORY",
       "STDEV",
       "STDEV.P",
       "STDEV.S",
@@ -12358,6 +12555,7 @@ var require_excel = __commonJS((exports, module) => {
       "T",
       "TAN",
       "TANH",
+      "TAKE",
       "TBILLEQ",
       "TBILLPRICE",
       "TBILLYIELD",
@@ -12366,26 +12564,33 @@ var require_excel = __commonJS((exports, module) => {
       "T.DIST.RT",
       "TDIST",
       "TEXT",
+      "TEXTAFTER",
+      "TEXTBEFORE",
       "TEXTJOIN",
+      "TEXTSPLIT",
       "TIME",
       "TIMEVALUE",
       "T.INV",
       "T.INV.2T",
       "TINV",
+      "TOCOL",
+      "TOROW",
       "TODAY",
       "TRANSPOSE",
       "TREND",
       "TRIM",
       "TRIMMEAN",
-      "TRUE|0",
+      "TRUE",
       "TRUNC",
       "T.TEST",
       "TTEST",
       "TYPE",
       "UNICHAR",
       "UNICODE",
+      "UNIQUE",
       "UPPER",
       "VALUE",
+      "VALUETOTEXT",
       "VAR",
       "VAR.P",
       "VAR.S",
@@ -12394,6 +12599,7 @@ var require_excel = __commonJS((exports, module) => {
       "VARPA",
       "VDB",
       "VLOOKUP",
+      "VSTACK",
       "WEBSERVICE",
       "WEEKDAY",
       "WEEKNUM",
@@ -12401,7 +12607,11 @@ var require_excel = __commonJS((exports, module) => {
       "WEIBULL.DIST",
       "WORKDAY",
       "WORKDAY.INTL",
+      "WRAPCOLS",
+      "WRAPROWS",
       "XIRR",
+      "XLOOKUP",
+      "XMATCH",
       "XNPV",
       "XOR",
       "YEAR",
@@ -13625,8 +13835,8 @@ var require_gams = __commonJS((exports, module) => {
       className: "comment",
       variants: [
         {
-          begin: "\'",
-          end: "\'"
+          begin: "'",
+          end: "'"
         },
         {
           begin: '"',
@@ -13922,54 +14132,133 @@ var require_gauss = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/gcode.js
 var require_gcode = __commonJS((exports, module) => {
   function gcode(hljs) {
-    const GCODE_IDENT_RE = "[A-Z_][A-Z0-9_.]*";
-    const GCODE_CLOSE_RE = "%";
+    const regex = hljs.regex;
     const GCODE_KEYWORDS = {
-      $pattern: GCODE_IDENT_RE,
-      keyword: "IF DO WHILE ENDWHILE CALL ENDIF SUB ENDSUB GOTO REPEAT ENDREPEAT " + "EQ LT GT NE GE LE OR XOR"
+      $pattern: /[A-Z]+|%/,
+      keyword: [
+        "THEN",
+        "ELSE",
+        "ENDIF",
+        "IF",
+        "GOTO",
+        "DO",
+        "WHILE",
+        "WH",
+        "END",
+        "CALL",
+        "SUB",
+        "ENDSUB",
+        "EQ",
+        "NE",
+        "LT",
+        "GT",
+        "LE",
+        "GE",
+        "AND",
+        "OR",
+        "XOR",
+        "%"
+      ],
+      built_in: [
+        "ATAN",
+        "ABS",
+        "ACOS",
+        "ASIN",
+        "COS",
+        "EXP",
+        "FIX",
+        "FUP",
+        "ROUND",
+        "LN",
+        "SIN",
+        "SQRT",
+        "TAN",
+        "EXISTS"
+      ]
     };
-    const GCODE_START = {
-      className: "meta",
-      begin: "([O])([0-9]+)"
-    };
-    const NUMBER = hljs.inherit(hljs.C_NUMBER_MODE, { begin: "([-+]?((\\.\\d+)|(\\d+)(\\.\\d*)?))|" + hljs.C_NUMBER_RE });
+    const LETTER_BOUNDARY_RE = /\b/;
+    function LETTER_BOUNDARY_CALLBACK(matchdata, response) {
+      if (matchdata.index === 0) {
+        return;
+      }
+      const charBeforeMatch = matchdata.input[matchdata.index - 1];
+      if (charBeforeMatch >= "0" && charBeforeMatch <= "9") {
+        return;
+      }
+      if (charBeforeMatch === "_") {
+        return;
+      }
+      response.ignoreMatch();
+    }
+    const NUMBER_RE = /[+-]?((\.\d+)|(\d+)(\.\d*)?)/;
+    const GENERAL_MISC_FUNCTION_RE = /[GM]\s*\d+(\.\d+)?/;
+    const TOOLS_RE = /T\s*\d+/;
+    const SUBROUTINE_RE = /O\s*\d+/;
+    const SUBROUTINE_NAMED_RE = /O<.+>/;
+    const AXES_RE = /[ABCUVWXYZ]\s*/;
+    const PARAMETERS_RE = /[FHIJKPQRS]\s*/;
     const GCODE_CODE = [
-      hljs.C_LINE_COMMENT_MODE,
-      hljs.C_BLOCK_COMMENT_MODE,
       hljs.COMMENT(/\(/, /\)/),
-      NUMBER,
-      hljs.inherit(hljs.APOS_STRING_MODE, { illegal: null }),
-      hljs.inherit(hljs.QUOTE_STRING_MODE, { illegal: null }),
+      hljs.COMMENT(/;/, /$/),
+      hljs.APOS_STRING_MODE,
+      hljs.QUOTE_STRING_MODE,
+      hljs.C_NUMBER_MODE,
       {
-        className: "name",
-        begin: "([G])([0-9]+\\.?[0-9]?)"
-      },
-      {
-        className: "name",
-        begin: "([M])([0-9]+\\.?[0-9]?)"
-      },
-      {
-        className: "attr",
-        begin: "(VC|VS|#)",
-        end: "(\\d+)"
-      },
-      {
-        className: "attr",
-        begin: "(VZOFX|VZOFY|VZOFZ)"
-      },
-      {
-        className: "built_in",
-        begin: "(ATAN|ABS|ACOS|ASIN|SIN|COS|EXP|FIX|FUP|ROUND|LN|TAN)(\\[)",
-        contains: [NUMBER],
-        end: "\\]"
-      },
-      {
-        className: "symbol",
+        scope: "title.function",
         variants: [
+          { match: regex.concat(LETTER_BOUNDARY_RE, GENERAL_MISC_FUNCTION_RE) },
           {
-            begin: "N",
-            end: "\\d+",
-            illegal: "\\W"
+            begin: GENERAL_MISC_FUNCTION_RE,
+            "on:begin": LETTER_BOUNDARY_CALLBACK
+          },
+          { match: regex.concat(LETTER_BOUNDARY_RE, TOOLS_RE) },
+          {
+            begin: TOOLS_RE,
+            "on:begin": LETTER_BOUNDARY_CALLBACK
+          }
+        ]
+      },
+      {
+        scope: "symbol",
+        variants: [
+          { match: regex.concat(LETTER_BOUNDARY_RE, SUBROUTINE_RE) },
+          {
+            begin: SUBROUTINE_RE,
+            "on:begin": LETTER_BOUNDARY_CALLBACK
+          },
+          { match: regex.concat(LETTER_BOUNDARY_RE, SUBROUTINE_NAMED_RE) },
+          {
+            begin: SUBROUTINE_NAMED_RE,
+            "on:begin": LETTER_BOUNDARY_CALLBACK
+          },
+          { match: /\*\s*\d+\s*$/ }
+        ]
+      },
+      {
+        scope: "operator",
+        match: /^N\s*\d+/
+      },
+      {
+        scope: "variable",
+        match: /-?#\s*\d+/
+      },
+      {
+        scope: "property",
+        variants: [
+          { match: regex.concat(LETTER_BOUNDARY_RE, AXES_RE, NUMBER_RE) },
+          {
+            begin: regex.concat(AXES_RE, NUMBER_RE),
+            "on:begin": LETTER_BOUNDARY_CALLBACK
+          }
+        ]
+      },
+      {
+        scope: "params",
+        variants: [
+          { match: regex.concat(LETTER_BOUNDARY_RE, PARAMETERS_RE, NUMBER_RE) },
+          {
+            begin: regex.concat(PARAMETERS_RE, NUMBER_RE),
+            "on:begin": LETTER_BOUNDARY_CALLBACK
           }
         ]
       }
@@ -13978,14 +14267,9 @@ var require_gcode = __commonJS((exports, module) => {
       name: "G-code (ISO 6983)",
       aliases: ["nc"],
       case_insensitive: true,
+      disableAutodetect: true,
       keywords: GCODE_KEYWORDS,
-      contains: [
-        {
-          className: "meta",
-          begin: GCODE_CLOSE_RE
-        },
-        GCODE_START
-      ].concat(GCODE_CODE)
+      contains: GCODE_CODE
     };
   }
   module.exports = gcode;
@@ -18170,7 +18454,7 @@ var require_haskell = __commonJS((exports, module) => {
     };
     const CONSTRUCTOR = {
       className: "type",
-      begin: "\\b[A-Z][\\w\']*",
+      begin: "\\b[A-Z][\\w']*",
       relevance: 0
     };
     const LIST = {
@@ -18184,7 +18468,7 @@ var require_haskell = __commonJS((exports, module) => {
           className: "type",
           begin: "\\b[A-Z][\\w]*(\\((\\.\\.|,|\\w+)\\))?"
         },
-        hljs.inherit(hljs.TITLE_MODE, { begin: "[_a-z][\\w\']*" }),
+        hljs.inherit(hljs.TITLE_MODE, { begin: "[_a-z][\\w']*" }),
         COMMENT
       ]
     };
@@ -18301,7 +18585,7 @@ var require_haskell = __commonJS((exports, module) => {
         hljs.QUOTE_STRING_MODE,
         NUMBER,
         CONSTRUCTOR,
-        hljs.inherit(hljs.TITLE_MODE, { begin: "^[_a-z][\\w\']*" }),
+        hljs.inherit(hljs.TITLE_MODE, { begin: "^[_a-z][\\w']*" }),
         { begin: `(?!-)${symbol}--+|--+(?!-)${symbol}` },
         COMMENT,
         {
@@ -18330,8 +18614,8 @@ var require_haxe = __commonJS((exports, module) => {
       contains: [
         {
           className: "string",
-          begin: "\'",
-          end: "\'",
+          begin: "'",
+          end: "'",
           contains: [
             hljs.BACKSLASH_ESCAPE,
             {
@@ -18603,7 +18887,7 @@ var require_http = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/hy.js
 var require_hy = __commonJS((exports, module) => {
   function hy(hljs) {
-    const SYMBOLSTART = "a-zA-Z_\\-!.?+*=<>&#\'";
+    const SYMBOLSTART = "a-zA-Z_\\-!.?+*=<>&#'";
     const SYMBOL_RE = "[" + SYMBOLSTART + "][" + SYMBOLSTART + "0-9/;:]*";
     const keywords = {
       $pattern: SYMBOL_RE,
@@ -18916,9 +19200,9 @@ var require_irpf90 = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/isbl.js
 var require_isbl = __commonJS((exports, module) => {
   function isbl(hljs) {
-    const UNDERSCORE_IDENT_RE = "[A-Za-z\u0410-\u042F\u0430-\u044F\u0451\u0401_!][A-Za-z\u0410-\u042F\u0430-\u044F\u0451\u0401_0-9]*";
-    const FUNCTION_NAME_IDENT_RE = "[A-Za-z\u0410-\u042F\u0430-\u044F\u0451\u0401_][A-Za-z\u0410-\u042F\u0430-\u044F\u0451\u0401_0-9]*";
-    const KEYWORD = "and \u0438 else \u0438\u043D\u0430\u0447\u0435 endexcept endfinally endforeach \u043A\u043E\u043D\u0435\u0446\u0432\u0441\u0435 endif \u043A\u043E\u043D\u0435\u0446\u0435\u0441\u043B\u0438 endwhile \u043A\u043E\u043D\u0435\u0446\u043F\u043E\u043A\u0430 " + "except exitfor finally foreach \u0432\u0441\u0435 if \u0435\u0441\u043B\u0438 in \u0432 not \u043D\u0435 or \u0438\u043B\u0438 try while \u043F\u043E\u043A\u0430 ";
+    const UNDERSCORE_IDENT_RE = "[A-Za-zА-Яа-яёЁ_!][A-Za-zА-Яа-яёЁ_0-9]*";
+    const FUNCTION_NAME_IDENT_RE = "[A-Za-zА-Яа-яёЁ_][A-Za-zА-Яа-яёЁ_0-9]*";
+    const KEYWORD = "and и else иначе endexcept endfinally endforeach конецвсе endif конецесли endwhile конецпока " + "except exitfor finally foreach все if если in в not не or или try while пока ";
     const sysres_constants = "SYSRES_CONST_ACCES_RIGHT_TYPE_EDIT " + "SYSRES_CONST_ACCES_RIGHT_TYPE_FULL " + "SYSRES_CONST_ACCES_RIGHT_TYPE_VIEW " + "SYSRES_CONST_ACCESS_MODE_REQUISITE_CODE " + "SYSRES_CONST_ACCESS_NO_ACCESS_VIEW " + "SYSRES_CONST_ACCESS_NO_ACCESS_VIEW_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_ADD_REQUISITE_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_ADD_REQUISITE_YES_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_CHANGE_REQUISITE_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_CHANGE_REQUISITE_YES_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_DELETE_REQUISITE_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_DELETE_REQUISITE_YES_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_EXECUTE_REQUISITE_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_EXECUTE_REQUISITE_YES_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_NO_ACCESS_REQUISITE_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_NO_ACCESS_REQUISITE_YES_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_RATIFY_REQUISITE_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_RATIFY_REQUISITE_YES_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_REQUISITE_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_VIEW " + "SYSRES_CONST_ACCESS_RIGHTS_VIEW_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_VIEW_REQUISITE_CODE " + "SYSRES_CONST_ACCESS_RIGHTS_VIEW_REQUISITE_YES_CODE " + "SYSRES_CONST_ACCESS_TYPE_CHANGE " + "SYSRES_CONST_ACCESS_TYPE_CHANGE_CODE " + "SYSRES_CONST_ACCESS_TYPE_EXISTS " + "SYSRES_CONST_ACCESS_TYPE_EXISTS_CODE " + "SYSRES_CONST_ACCESS_TYPE_FULL " + "SYSRES_CONST_ACCESS_TYPE_FULL_CODE " + "SYSRES_CONST_ACCESS_TYPE_VIEW " + "SYSRES_CONST_ACCESS_TYPE_VIEW_CODE " + "SYSRES_CONST_ACTION_TYPE_ABORT " + "SYSRES_CONST_ACTION_TYPE_ACCEPT " + "SYSRES_CONST_ACTION_TYPE_ACCESS_RIGHTS " + "SYSRES_CONST_ACTION_TYPE_ADD_ATTACHMENT " + "SYSRES_CONST_ACTION_TYPE_CHANGE_CARD " + "SYSRES_CONST_ACTION_TYPE_CHANGE_KIND " + "SYSRES_CONST_ACTION_TYPE_CHANGE_STORAGE " + "SYSRES_CONST_ACTION_TYPE_CONTINUE " + "SYSRES_CONST_ACTION_TYPE_COPY " + "SYSRES_CONST_ACTION_TYPE_CREATE " + "SYSRES_CONST_ACTION_TYPE_CREATE_VERSION " + "SYSRES_CONST_ACTION_TYPE_DELETE " + "SYSRES_CONST_ACTION_TYPE_DELETE_ATTACHMENT " + "SYSRES_CONST_ACTION_TYPE_DELETE_VERSION " + "SYSRES_CONST_ACTION_TYPE_DISABLE_DELEGATE_ACCESS_RIGHTS " + "SYSRES_CONST_ACTION_TYPE_ENABLE_DELEGATE_ACCESS_RIGHTS " + "SYSRES_CONST_ACTION_TYPE_ENCRYPTION_BY_CERTIFICATE " + "SYSRES_CONST_ACTION_TYPE_ENCRYPTION_BY_CERTIFICATE_AND_PASSWORD " + "SYSRES_CONST_ACTION_TYPE_ENCRYPTION_BY_PASSWORD " + "SYSRES_CONST_ACTION_TYPE_EXPORT_WITH_LOCK " + "SYSRES_CONST_ACTION_TYPE_EXPORT_WITHOUT_LOCK " + "SYSRES_CONST_ACTION_TYPE_IMPORT_WITH_UNLOCK " + "SYSRES_CONST_ACTION_TYPE_IMPORT_WITHOUT_UNLOCK " + "SYSRES_CONST_ACTION_TYPE_LIFE_CYCLE_STAGE " + "SYSRES_CONST_ACTION_TYPE_LOCK " + "SYSRES_CONST_ACTION_TYPE_LOCK_FOR_SERVER " + "SYSRES_CONST_ACTION_TYPE_LOCK_MODIFY " + "SYSRES_CONST_ACTION_TYPE_MARK_AS_READED " + "SYSRES_CONST_ACTION_TYPE_MARK_AS_UNREADED " + "SYSRES_CONST_ACTION_TYPE_MODIFY " + "SYSRES_CONST_ACTION_TYPE_MODIFY_CARD " + "SYSRES_CONST_ACTION_TYPE_MOVE_TO_ARCHIVE " + "SYSRES_CONST_ACTION_TYPE_OFF_ENCRYPTION " + "SYSRES_CONST_ACTION_TYPE_PASSWORD_CHANGE " + "SYSRES_CONST_ACTION_TYPE_PERFORM " + "SYSRES_CONST_ACTION_TYPE_RECOVER_FROM_LOCAL_COPY " + "SYSRES_CONST_ACTION_TYPE_RESTART " + "SYSRES_CONST_ACTION_TYPE_RESTORE_FROM_ARCHIVE " + "SYSRES_CONST_ACTION_TYPE_REVISION " + "SYSRES_CONST_ACTION_TYPE_SEND_BY_MAIL " + "SYSRES_CONST_ACTION_TYPE_SIGN " + "SYSRES_CONST_ACTION_TYPE_START " + "SYSRES_CONST_ACTION_TYPE_UNLOCK " + "SYSRES_CONST_ACTION_TYPE_UNLOCK_FROM_SERVER " + "SYSRES_CONST_ACTION_TYPE_VERSION_STATE " + "SYSRES_CONST_ACTION_TYPE_VERSION_VISIBILITY " + "SYSRES_CONST_ACTION_TYPE_VIEW " + "SYSRES_CONST_ACTION_TYPE_VIEW_SHADOW_COPY " + "SYSRES_CONST_ACTION_TYPE_WORKFLOW_DESCRIPTION_MODIFY " + "SYSRES_CONST_ACTION_TYPE_WRITE_HISTORY " + "SYSRES_CONST_ACTIVE_VERSION_STATE_PICK_VALUE " + "SYSRES_CONST_ADD_REFERENCE_MODE_NAME " + "SYSRES_CONST_ADDITION_REQUISITE_CODE " + "SYSRES_CONST_ADDITIONAL_PARAMS_REQUISITE_CODE " + "SYSRES_CONST_ADITIONAL_JOB_END_DATE_REQUISITE_NAME " + "SYSRES_CONST_ADITIONAL_JOB_READ_REQUISITE_NAME " + "SYSRES_CONST_ADITIONAL_JOB_START_DATE_REQUISITE_NAME " + "SYSRES_CONST_ADITIONAL_JOB_STATE_REQUISITE_NAME " + "SYSRES_CONST_ADMINISTRATION_HISTORY_ADDING_USER_TO_GROUP_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_ADDING_USER_TO_GROUP_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_CREATION_COMP_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_CREATION_COMP_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_CREATION_GROUP_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_CREATION_GROUP_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_CREATION_USER_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_CREATION_USER_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DATABASE_USER_CREATION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DATABASE_USER_CREATION_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DATABASE_USER_DELETION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DATABASE_USER_DELETION_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DELETION_COMP_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DELETION_COMP_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DELETION_GROUP_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DELETION_GROUP_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DELETION_USER_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DELETION_USER_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DELETION_USER_FROM_GROUP_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_DELETION_USER_FROM_GROUP_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_GRANTING_FILTERER_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_GRANTING_FILTERER_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_GRANTING_FILTERER_RESTRICTION_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_GRANTING_FILTERER_RESTRICTION_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_GRANTING_PRIVILEGE_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_GRANTING_PRIVILEGE_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_GRANTING_RIGHTS_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_GRANTING_RIGHTS_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_IS_MAIN_SERVER_CHANGED_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_IS_MAIN_SERVER_CHANGED_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_IS_PUBLIC_CHANGED_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_IS_PUBLIC_CHANGED_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_REMOVING_FILTERER_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_REMOVING_FILTERER_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_REMOVING_FILTERER_RESTRICTION_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_REMOVING_FILTERER_RESTRICTION_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_REMOVING_PRIVILEGE_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_REMOVING_PRIVILEGE_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_REMOVING_RIGHTS_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_REMOVING_RIGHTS_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_SERVER_LOGIN_CREATION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_SERVER_LOGIN_CREATION_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_SERVER_LOGIN_DELETION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_SERVER_LOGIN_DELETION_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_CATEGORY_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_CATEGORY_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_COMP_TITLE_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_COMP_TITLE_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_FULL_NAME_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_FULL_NAME_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_GROUP_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_GROUP_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_PARENT_GROUP_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_PARENT_GROUP_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_USER_AUTH_TYPE_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_USER_AUTH_TYPE_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_USER_LOGIN_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_USER_LOGIN_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_USER_STATUS_ACTION " + "SYSRES_CONST_ADMINISTRATION_HISTORY_UPDATING_USER_STATUS_ACTION_CODE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_USER_PASSWORD_CHANGE " + "SYSRES_CONST_ADMINISTRATION_HISTORY_USER_PASSWORD_CHANGE_ACTION " + "SYSRES_CONST_ALL_ACCEPT_CONDITION_RUS " + "SYSRES_CONST_ALL_USERS_GROUP " + "SYSRES_CONST_ALL_USERS_GROUP_NAME " + "SYSRES_CONST_ALL_USERS_SERVER_GROUP_NAME " + "SYSRES_CONST_ALLOWED_ACCESS_TYPE_CODE " + "SYSRES_CONST_ALLOWED_ACCESS_TYPE_NAME " + "SYSRES_CONST_APP_VIEWER_TYPE_REQUISITE_CODE " + "SYSRES_CONST_APPROVING_SIGNATURE_NAME " + "SYSRES_CONST_APPROVING_SIGNATURE_REQUISITE_CODE " + "SYSRES_CONST_ASSISTANT_SUBSTITUE_TYPE " + "SYSRES_CONST_ASSISTANT_SUBSTITUE_TYPE_CODE " + "SYSRES_CONST_ATTACH_TYPE_COMPONENT_TOKEN " + "SYSRES_CONST_ATTACH_TYPE_DOC " + "SYSRES_CONST_ATTACH_TYPE_EDOC " + "SYSRES_CONST_ATTACH_TYPE_FOLDER " + "SYSRES_CONST_ATTACH_TYPE_JOB " + "SYSRES_CONST_ATTACH_TYPE_REFERENCE " + "SYSRES_CONST_ATTACH_TYPE_TASK " + "SYSRES_CONST_AUTH_ENCODED_PASSWORD " + "SYSRES_CONST_AUTH_ENCODED_PASSWORD_CODE " + "SYSRES_CONST_AUTH_NOVELL " + "SYSRES_CONST_AUTH_PASSWORD " + "SYSRES_CONST_AUTH_PASSWORD_CODE " + "SYSRES_CONST_AUTH_WINDOWS " + "SYSRES_CONST_AUTHENTICATING_SIGNATURE_NAME " + "SYSRES_CONST_AUTHENTICATING_SIGNATURE_REQUISITE_CODE " + "SYSRES_CONST_AUTO_ENUM_METHOD_FLAG " + "SYSRES_CONST_AUTO_NUMERATION_CODE " + "SYSRES_CONST_AUTO_STRONG_ENUM_METHOD_FLAG " + "SYSRES_CONST_AUTOTEXT_NAME_REQUISITE_CODE " + "SYSRES_CONST_AUTOTEXT_TEXT_REQUISITE_CODE " + "SYSRES_CONST_AUTOTEXT_USAGE_ALL " + "SYSRES_CONST_AUTOTEXT_USAGE_ALL_CODE " + "SYSRES_CONST_AUTOTEXT_USAGE_SIGN " + "SYSRES_CONST_AUTOTEXT_USAGE_SIGN_CODE " + "SYSRES_CONST_AUTOTEXT_USAGE_WORK " + "SYSRES_CONST_AUTOTEXT_USAGE_WORK_CODE " + "SYSRES_CONST_AUTOTEXT_USE_ANYWHERE_CODE " + "SYSRES_CONST_AUTOTEXT_USE_ON_SIGNING_CODE " + "SYSRES_CONST_AUTOTEXT_USE_ON_WORK_CODE " + "SYSRES_CONST_BEGIN_DATE_REQUISITE_CODE " + "SYSRES_CONST_BLACK_LIFE_CYCLE_STAGE_FONT_COLOR " + "SYSRES_CONST_BLUE_LIFE_CYCLE_STAGE_FONT_COLOR " + "SYSRES_CONST_BTN_PART " + "SYSRES_CONST_CALCULATED_ROLE_TYPE_CODE " + "SYSRES_CONST_CALL_TYPE_VARIABLE_BUTTON_VALUE " + "SYSRES_CONST_CALL_TYPE_VARIABLE_PROGRAM_VALUE " + "SYSRES_CONST_CANCEL_MESSAGE_FUNCTION_RESULT " + "SYSRES_CONST_CARD_PART " + "SYSRES_CONST_CARD_REFERENCE_MODE_NAME " + "SYSRES_CONST_CERTIFICATE_TYPE_REQUISITE_ENCRYPT_VALUE " + "SYSRES_CONST_CERTIFICATE_TYPE_REQUISITE_SIGN_AND_ENCRYPT_VALUE " + "SYSRES_CONST_CERTIFICATE_TYPE_REQUISITE_SIGN_VALUE " + "SYSRES_CONST_CHECK_PARAM_VALUE_DATE_PARAM_TYPE " + "SYSRES_CONST_CHECK_PARAM_VALUE_FLOAT_PARAM_TYPE " + "SYSRES_CONST_CHECK_PARAM_VALUE_INTEGER_PARAM_TYPE " + "SYSRES_CONST_CHECK_PARAM_VALUE_PICK_PARAM_TYPE " + "SYSRES_CONST_CHECK_PARAM_VALUE_REEFRENCE_PARAM_TYPE " + "SYSRES_CONST_CLOSED_RECORD_FLAG_VALUE_FEMININE " + "SYSRES_CONST_CLOSED_RECORD_FLAG_VALUE_MASCULINE " + "SYSRES_CONST_CODE_COMPONENT_TYPE_ADMIN " + "SYSRES_CONST_CODE_COMPONENT_TYPE_DEVELOPER " + "SYSRES_CONST_CODE_COMPONENT_TYPE_DOCS " + "SYSRES_CONST_CODE_COMPONENT_TYPE_EDOC_CARDS " + "SYSRES_CONST_CODE_COMPONENT_TYPE_EXTERNAL_EXECUTABLE " + "SYSRES_CONST_CODE_COMPONENT_TYPE_OTHER " + "SYSRES_CONST_CODE_COMPONENT_TYPE_REFERENCE " + "SYSRES_CONST_CODE_COMPONENT_TYPE_REPORT " + "SYSRES_CONST_CODE_COMPONENT_TYPE_SCRIPT " + "SYSRES_CONST_CODE_COMPONENT_TYPE_URL " + "SYSRES_CONST_CODE_REQUISITE_ACCESS " + "SYSRES_CONST_CODE_REQUISITE_CODE " + "SYSRES_CONST_CODE_REQUISITE_COMPONENT " + "SYSRES_CONST_CODE_REQUISITE_DESCRIPTION " + "SYSRES_CONST_CODE_REQUISITE_EXCLUDE_COMPONENT " + "SYSRES_CONST_CODE_REQUISITE_RECORD " + "SYSRES_CONST_COMMENT_REQ_CODE " + "SYSRES_CONST_COMMON_SETTINGS_REQUISITE_CODE " + "SYSRES_CONST_COMP_CODE_GRD " + "SYSRES_CONST_COMPONENT_GROUP_TYPE_REQUISITE_CODE " + "SYSRES_CONST_COMPONENT_TYPE_ADMIN_COMPONENTS " + "SYSRES_CONST_COMPONENT_TYPE_DEVELOPER_COMPONENTS " + "SYSRES_CONST_COMPONENT_TYPE_DOCS " + "SYSRES_CONST_COMPONENT_TYPE_EDOC_CARDS " + "SYSRES_CONST_COMPONENT_TYPE_EDOCS " + "SYSRES_CONST_COMPONENT_TYPE_EXTERNAL_EXECUTABLE " + "SYSRES_CONST_COMPONENT_TYPE_OTHER " + "SYSRES_CONST_COMPONENT_TYPE_REFERENCE_TYPES " + "SYSRES_CONST_COMPONENT_TYPE_REFERENCES " + "SYSRES_CONST_COMPONENT_TYPE_REPORTS " + "SYSRES_CONST_COMPONENT_TYPE_SCRIPTS " + "SYSRES_CONST_COMPONENT_TYPE_URL " + "SYSRES_CONST_COMPONENTS_REMOTE_SERVERS_VIEW_CODE " + "SYSRES_CONST_CONDITION_BLOCK_DESCRIPTION " + "SYSRES_CONST_CONST_FIRM_STATUS_COMMON " + "SYSRES_CONST_CONST_FIRM_STATUS_INDIVIDUAL " + "SYSRES_CONST_CONST_NEGATIVE_VALUE " + "SYSRES_CONST_CONST_POSITIVE_VALUE " + "SYSRES_CONST_CONST_SERVER_STATUS_DONT_REPLICATE " + "SYSRES_CONST_CONST_SERVER_STATUS_REPLICATE " + "SYSRES_CONST_CONTENTS_REQUISITE_CODE " + "SYSRES_CONST_DATA_TYPE_BOOLEAN " + "SYSRES_CONST_DATA_TYPE_DATE " + "SYSRES_CONST_DATA_TYPE_FLOAT " + "SYSRES_CONST_DATA_TYPE_INTEGER " + "SYSRES_CONST_DATA_TYPE_PICK " + "SYSRES_CONST_DATA_TYPE_REFERENCE " + "SYSRES_CONST_DATA_TYPE_STRING " + "SYSRES_CONST_DATA_TYPE_TEXT " + "SYSRES_CONST_DATA_TYPE_VARIANT " + "SYSRES_CONST_DATE_CLOSE_REQ_CODE " + "SYSRES_CONST_DATE_FORMAT_DATE_ONLY_CHAR " + "SYSRES_CONST_DATE_OPEN_REQ_CODE " + "SYSRES_CONST_DATE_REQUISITE " + "SYSRES_CONST_DATE_REQUISITE_CODE " + "SYSRES_CONST_DATE_REQUISITE_NAME " + "SYSRES_CONST_DATE_REQUISITE_TYPE " + "SYSRES_CONST_DATE_TYPE_CHAR " + "SYSRES_CONST_DATETIME_FORMAT_VALUE " + "SYSRES_CONST_DEA_ACCESS_RIGHTS_ACTION_CODE " + "SYSRES_CONST_DESCRIPTION_LOCALIZE_ID_REQUISITE_CODE " + "SYSRES_CONST_DESCRIPTION_REQUISITE_CODE " + "SYSRES_CONST_DET1_PART " + "SYSRES_CONST_DET2_PART " + "SYSRES_CONST_DET3_PART " + "SYSRES_CONST_DET4_PART " + "SYSRES_CONST_DET5_PART " + "SYSRES_CONST_DET6_PART " + "SYSRES_CONST_DETAIL_DATASET_KEY_REQUISITE_CODE " + "SYSRES_CONST_DETAIL_PICK_REQUISITE_CODE " + "SYSRES_CONST_DETAIL_REQ_CODE " + "SYSRES_CONST_DO_NOT_USE_ACCESS_TYPE_CODE " + "SYSRES_CONST_DO_NOT_USE_ACCESS_TYPE_NAME " + "SYSRES_CONST_DO_NOT_USE_ON_VIEW_ACCESS_TYPE_CODE " + "SYSRES_CONST_DO_NOT_USE_ON_VIEW_ACCESS_TYPE_NAME " + "SYSRES_CONST_DOCUMENT_STORAGES_CODE " + "SYSRES_CONST_DOCUMENT_TEMPLATES_TYPE_NAME " + "SYSRES_CONST_DOUBLE_REQUISITE_CODE " + "SYSRES_CONST_EDITOR_CLOSE_FILE_OBSERV_TYPE_CODE " + "SYSRES_CONST_EDITOR_CLOSE_PROCESS_OBSERV_TYPE_CODE " + "SYSRES_CONST_EDITOR_TYPE_REQUISITE_CODE " + "SYSRES_CONST_EDITORS_APPLICATION_NAME_REQUISITE_CODE " + "SYSRES_CONST_EDITORS_CREATE_SEVERAL_PROCESSES_REQUISITE_CODE " + "SYSRES_CONST_EDITORS_EXTENSION_REQUISITE_CODE " + "SYSRES_CONST_EDITORS_OBSERVER_BY_PROCESS_TYPE " + "SYSRES_CONST_EDITORS_REFERENCE_CODE " + "SYSRES_CONST_EDITORS_REPLACE_SPEC_CHARS_REQUISITE_CODE " + "SYSRES_CONST_EDITORS_USE_PLUGINS_REQUISITE_CODE " + "SYSRES_CONST_EDITORS_VIEW_DOCUMENT_OPENED_TO_EDIT_CODE " + "SYSRES_CONST_EDOC_CARD_TYPE_REQUISITE_CODE " + "SYSRES_CONST_EDOC_CARD_TYPES_LINK_REQUISITE_CODE " + "SYSRES_CONST_EDOC_CERTIFICATE_AND_PASSWORD_ENCODE_CODE " + "SYSRES_CONST_EDOC_CERTIFICATE_ENCODE_CODE " + "SYSRES_CONST_EDOC_DATE_REQUISITE_CODE " + "SYSRES_CONST_EDOC_KIND_REFERENCE_CODE " + "SYSRES_CONST_EDOC_KINDS_BY_TEMPLATE_ACTION_CODE " + "SYSRES_CONST_EDOC_MANAGE_ACCESS_CODE " + "SYSRES_CONST_EDOC_NONE_ENCODE_CODE " + "SYSRES_CONST_EDOC_NUMBER_REQUISITE_CODE " + "SYSRES_CONST_EDOC_PASSWORD_ENCODE_CODE " + "SYSRES_CONST_EDOC_READONLY_ACCESS_CODE " + "SYSRES_CONST_EDOC_SHELL_LIFE_TYPE_VIEW_VALUE " + "SYSRES_CONST_EDOC_SIZE_RESTRICTION_PRIORITY_REQUISITE_CODE " + "SYSRES_CONST_EDOC_STORAGE_CHECK_ACCESS_RIGHTS_REQUISITE_CODE " + "SYSRES_CONST_EDOC_STORAGE_COMPUTER_NAME_REQUISITE_CODE " + "SYSRES_CONST_EDOC_STORAGE_DATABASE_NAME_REQUISITE_CODE " + "SYSRES_CONST_EDOC_STORAGE_EDIT_IN_STORAGE_REQUISITE_CODE " + "SYSRES_CONST_EDOC_STORAGE_LOCAL_PATH_REQUISITE_CODE " + "SYSRES_CONST_EDOC_STORAGE_SHARED_SOURCE_NAME_REQUISITE_CODE " + "SYSRES_CONST_EDOC_TEMPLATE_REQUISITE_CODE " + "SYSRES_CONST_EDOC_TYPES_REFERENCE_CODE " + "SYSRES_CONST_EDOC_VERSION_ACTIVE_STAGE_CODE " + "SYSRES_CONST_EDOC_VERSION_DESIGN_STAGE_CODE " + "SYSRES_CONST_EDOC_VERSION_OBSOLETE_STAGE_CODE " + "SYSRES_CONST_EDOC_WRITE_ACCES_CODE " + "SYSRES_CONST_EDOCUMENT_CARD_REQUISITES_REFERENCE_CODE_SELECTED_REQUISITE " + "SYSRES_CONST_ENCODE_CERTIFICATE_TYPE_CODE " + "SYSRES_CONST_END_DATE_REQUISITE_CODE " + "SYSRES_CONST_ENUMERATION_TYPE_REQUISITE_CODE " + "SYSRES_CONST_EXECUTE_ACCESS_RIGHTS_TYPE_CODE " + "SYSRES_CONST_EXECUTIVE_FILE_STORAGE_TYPE " + "SYSRES_CONST_EXIST_CONST " + "SYSRES_CONST_EXIST_VALUE " + "SYSRES_CONST_EXPORT_LOCK_TYPE_ASK " + "SYSRES_CONST_EXPORT_LOCK_TYPE_WITH_LOCK " + "SYSRES_CONST_EXPORT_LOCK_TYPE_WITHOUT_LOCK " + "SYSRES_CONST_EXPORT_VERSION_TYPE_ASK " + "SYSRES_CONST_EXPORT_VERSION_TYPE_LAST " + "SYSRES_CONST_EXPORT_VERSION_TYPE_LAST_ACTIVE " + "SYSRES_CONST_EXTENSION_REQUISITE_CODE " + "SYSRES_CONST_FILTER_NAME_REQUISITE_CODE " + "SYSRES_CONST_FILTER_REQUISITE_CODE " + "SYSRES_CONST_FILTER_TYPE_COMMON_CODE " + "SYSRES_CONST_FILTER_TYPE_COMMON_NAME " + "SYSRES_CONST_FILTER_TYPE_USER_CODE " + "SYSRES_CONST_FILTER_TYPE_USER_NAME " + "SYSRES_CONST_FILTER_VALUE_REQUISITE_NAME " + "SYSRES_CONST_FLOAT_NUMBER_FORMAT_CHAR " + "SYSRES_CONST_FLOAT_REQUISITE_TYPE " + "SYSRES_CONST_FOLDER_AUTHOR_VALUE " + "SYSRES_CONST_FOLDER_KIND_ANY_OBJECTS " + "SYSRES_CONST_FOLDER_KIND_COMPONENTS " + "SYSRES_CONST_FOLDER_KIND_EDOCS " + "SYSRES_CONST_FOLDER_KIND_JOBS " + "SYSRES_CONST_FOLDER_KIND_TASKS " + "SYSRES_CONST_FOLDER_TYPE_COMMON " + "SYSRES_CONST_FOLDER_TYPE_COMPONENT " + "SYSRES_CONST_FOLDER_TYPE_FAVORITES " + "SYSRES_CONST_FOLDER_TYPE_INBOX " + "SYSRES_CONST_FOLDER_TYPE_OUTBOX " + "SYSRES_CONST_FOLDER_TYPE_QUICK_LAUNCH " + "SYSRES_CONST_FOLDER_TYPE_SEARCH " + "SYSRES_CONST_FOLDER_TYPE_SHORTCUTS " + "SYSRES_CONST_FOLDER_TYPE_USER " + "SYSRES_CONST_FROM_DICTIONARY_ENUM_METHOD_FLAG " + "SYSRES_CONST_FULL_SUBSTITUTE_TYPE " + "SYSRES_CONST_FULL_SUBSTITUTE_TYPE_CODE " + "SYSRES_CONST_FUNCTION_CANCEL_RESULT " + "SYSRES_CONST_FUNCTION_CATEGORY_SYSTEM " + "SYSRES_CONST_FUNCTION_CATEGORY_USER " + "SYSRES_CONST_FUNCTION_FAILURE_RESULT " + "SYSRES_CONST_FUNCTION_SAVE_RESULT " + "SYSRES_CONST_GENERATED_REQUISITE " + "SYSRES_CONST_GREEN_LIFE_CYCLE_STAGE_FONT_COLOR " + "SYSRES_CONST_GROUP_ACCOUNT_TYPE_VALUE_CODE " + "SYSRES_CONST_GROUP_CATEGORY_NORMAL_CODE " + "SYSRES_CONST_GROUP_CATEGORY_NORMAL_NAME " + "SYSRES_CONST_GROUP_CATEGORY_SERVICE_CODE " + "SYSRES_CONST_GROUP_CATEGORY_SERVICE_NAME " + "SYSRES_CONST_GROUP_COMMON_CATEGORY_FIELD_VALUE " + "SYSRES_CONST_GROUP_FULL_NAME_REQUISITE_CODE " + "SYSRES_CONST_GROUP_NAME_REQUISITE_CODE " + "SYSRES_CONST_GROUP_RIGHTS_T_REQUISITE_CODE " + "SYSRES_CONST_GROUP_SERVER_CODES_REQUISITE_CODE " + "SYSRES_CONST_GROUP_SERVER_NAME_REQUISITE_CODE " + "SYSRES_CONST_GROUP_SERVICE_CATEGORY_FIELD_VALUE " + "SYSRES_CONST_GROUP_USER_REQUISITE_CODE " + "SYSRES_CONST_GROUPS_REFERENCE_CODE " + "SYSRES_CONST_GROUPS_REQUISITE_CODE " + "SYSRES_CONST_HIDDEN_MODE_NAME " + "SYSRES_CONST_HIGH_LVL_REQUISITE_CODE " + "SYSRES_CONST_HISTORY_ACTION_CREATE_CODE " + "SYSRES_CONST_HISTORY_ACTION_DELETE_CODE " + "SYSRES_CONST_HISTORY_ACTION_EDIT_CODE " + "SYSRES_CONST_HOUR_CHAR " + "SYSRES_CONST_ID_REQUISITE_CODE " + "SYSRES_CONST_IDSPS_REQUISITE_CODE " + "SYSRES_CONST_IMAGE_MODE_COLOR " + "SYSRES_CONST_IMAGE_MODE_GREYSCALE " + "SYSRES_CONST_IMAGE_MODE_MONOCHROME " + "SYSRES_CONST_IMPORTANCE_HIGH " + "SYSRES_CONST_IMPORTANCE_LOW " + "SYSRES_CONST_IMPORTANCE_NORMAL " + "SYSRES_CONST_IN_DESIGN_VERSION_STATE_PICK_VALUE " + "SYSRES_CONST_INCOMING_WORK_RULE_TYPE_CODE " + "SYSRES_CONST_INT_REQUISITE " + "SYSRES_CONST_INT_REQUISITE_TYPE " + "SYSRES_CONST_INTEGER_NUMBER_FORMAT_CHAR " + "SYSRES_CONST_INTEGER_TYPE_CHAR " + "SYSRES_CONST_IS_GENERATED_REQUISITE_NEGATIVE_VALUE " + "SYSRES_CONST_IS_PUBLIC_ROLE_REQUISITE_CODE " + "SYSRES_CONST_IS_REMOTE_USER_NEGATIVE_VALUE " + "SYSRES_CONST_IS_REMOTE_USER_POSITIVE_VALUE " + "SYSRES_CONST_IS_STORED_REQUISITE_NEGATIVE_VALUE " + "SYSRES_CONST_IS_STORED_REQUISITE_STORED_VALUE " + "SYSRES_CONST_ITALIC_LIFE_CYCLE_STAGE_DRAW_STYLE " + "SYSRES_CONST_JOB_BLOCK_DESCRIPTION " + "SYSRES_CONST_JOB_KIND_CONTROL_JOB " + "SYSRES_CONST_JOB_KIND_JOB " + "SYSRES_CONST_JOB_KIND_NOTICE " + "SYSRES_CONST_JOB_STATE_ABORTED " + "SYSRES_CONST_JOB_STATE_COMPLETE " + "SYSRES_CONST_JOB_STATE_WORKING " + "SYSRES_CONST_KIND_REQUISITE_CODE " + "SYSRES_CONST_KIND_REQUISITE_NAME " + "SYSRES_CONST_KINDS_CREATE_SHADOW_COPIES_REQUISITE_CODE " + "SYSRES_CONST_KINDS_DEFAULT_EDOC_LIFE_STAGE_REQUISITE_CODE " + "SYSRES_CONST_KINDS_EDOC_ALL_TEPLATES_ALLOWED_REQUISITE_CODE " + "SYSRES_CONST_KINDS_EDOC_ALLOW_LIFE_CYCLE_STAGE_CHANGING_REQUISITE_CODE " + "SYSRES_CONST_KINDS_EDOC_ALLOW_MULTIPLE_ACTIVE_VERSIONS_REQUISITE_CODE " + "SYSRES_CONST_KINDS_EDOC_SHARE_ACCES_RIGHTS_BY_DEFAULT_CODE " + "SYSRES_CONST_KINDS_EDOC_TEMPLATE_REQUISITE_CODE " + "SYSRES_CONST_KINDS_EDOC_TYPE_REQUISITE_CODE " + "SYSRES_CONST_KINDS_SIGNERS_REQUISITES_CODE " + "SYSRES_CONST_KOD_INPUT_TYPE " + "SYSRES_CONST_LAST_UPDATE_DATE_REQUISITE_CODE " + "SYSRES_CONST_LIFE_CYCLE_START_STAGE_REQUISITE_CODE " + "SYSRES_CONST_LILAC_LIFE_CYCLE_STAGE_FONT_COLOR " + "SYSRES_CONST_LINK_OBJECT_KIND_COMPONENT " + "SYSRES_CONST_LINK_OBJECT_KIND_DOCUMENT " + "SYSRES_CONST_LINK_OBJECT_KIND_EDOC " + "SYSRES_CONST_LINK_OBJECT_KIND_FOLDER " + "SYSRES_CONST_LINK_OBJECT_KIND_JOB " + "SYSRES_CONST_LINK_OBJECT_KIND_REFERENCE " + "SYSRES_CONST_LINK_OBJECT_KIND_TASK " + "SYSRES_CONST_LINK_REF_TYPE_REQUISITE_CODE " + "SYSRES_CONST_LIST_REFERENCE_MODE_NAME " + "SYSRES_CONST_LOCALIZATION_DICTIONARY_MAIN_VIEW_CODE " + "SYSRES_CONST_MAIN_VIEW_CODE " + "SYSRES_CONST_MANUAL_ENUM_METHOD_FLAG " + "SYSRES_CONST_MASTER_COMP_TYPE_REQUISITE_CODE " + "SYSRES_CONST_MASTER_TABLE_REC_ID_REQUISITE_CODE " + "SYSRES_CONST_MAXIMIZED_MODE_NAME " + "SYSRES_CONST_ME_VALUE " + "SYSRES_CONST_MESSAGE_ATTENTION_CAPTION " + "SYSRES_CONST_MESSAGE_CONFIRMATION_CAPTION " + "SYSRES_CONST_MESSAGE_ERROR_CAPTION " + "SYSRES_CONST_MESSAGE_INFORMATION_CAPTION " + "SYSRES_CONST_MINIMIZED_MODE_NAME " + "SYSRES_CONST_MINUTE_CHAR " + "SYSRES_CONST_MODULE_REQUISITE_CODE " + "SYSRES_CONST_MONITORING_BLOCK_DESCRIPTION " + "SYSRES_CONST_MONTH_FORMAT_VALUE " + "SYSRES_CONST_NAME_LOCALIZE_ID_REQUISITE_CODE " + "SYSRES_CONST_NAME_REQUISITE_CODE " + "SYSRES_CONST_NAME_SINGULAR_REQUISITE_CODE " + "SYSRES_CONST_NAMEAN_INPUT_TYPE " + "SYSRES_CONST_NEGATIVE_PICK_VALUE " + "SYSRES_CONST_NEGATIVE_VALUE " + "SYSRES_CONST_NO " + "SYSRES_CONST_NO_PICK_VALUE " + "SYSRES_CONST_NO_SIGNATURE_REQUISITE_CODE " + "SYSRES_CONST_NO_VALUE " + "SYSRES_CONST_NONE_ACCESS_RIGHTS_TYPE_CODE " + "SYSRES_CONST_NONOPERATING_RECORD_FLAG_VALUE " + "SYSRES_CONST_NONOPERATING_RECORD_FLAG_VALUE_MASCULINE " + "SYSRES_CONST_NORMAL_ACCESS_RIGHTS_TYPE_CODE " + "SYSRES_CONST_NORMAL_LIFE_CYCLE_STAGE_DRAW_STYLE " + "SYSRES_CONST_NORMAL_MODE_NAME " + "SYSRES_CONST_NOT_ALLOWED_ACCESS_TYPE_CODE " + "SYSRES_CONST_NOT_ALLOWED_ACCESS_TYPE_NAME " + "SYSRES_CONST_NOTE_REQUISITE_CODE " + "SYSRES_CONST_NOTICE_BLOCK_DESCRIPTION " + "SYSRES_CONST_NUM_REQUISITE " + "SYSRES_CONST_NUM_STR_REQUISITE_CODE " + "SYSRES_CONST_NUMERATION_AUTO_NOT_STRONG " + "SYSRES_CONST_NUMERATION_AUTO_STRONG " + "SYSRES_CONST_NUMERATION_FROM_DICTONARY " + "SYSRES_CONST_NUMERATION_MANUAL " + "SYSRES_CONST_NUMERIC_TYPE_CHAR " + "SYSRES_CONST_NUMREQ_REQUISITE_CODE " + "SYSRES_CONST_OBSOLETE_VERSION_STATE_PICK_VALUE " + "SYSRES_CONST_OPERATING_RECORD_FLAG_VALUE " + "SYSRES_CONST_OPERATING_RECORD_FLAG_VALUE_CODE " + "SYSRES_CONST_OPERATING_RECORD_FLAG_VALUE_FEMININE " + "SYSRES_CONST_OPERATING_RECORD_FLAG_VALUE_MASCULINE " + "SYSRES_CONST_OPTIONAL_FORM_COMP_REQCODE_PREFIX " + "SYSRES_CONST_ORANGE_LIFE_CYCLE_STAGE_FONT_COLOR " + "SYSRES_CONST_ORIGINALREF_REQUISITE_CODE " + "SYSRES_CONST_OURFIRM_REF_CODE " + "SYSRES_CONST_OURFIRM_REQUISITE_CODE " + "SYSRES_CONST_OURFIRM_VAR " + "SYSRES_CONST_OUTGOING_WORK_RULE_TYPE_CODE " + "SYSRES_CONST_PICK_NEGATIVE_RESULT " + "SYSRES_CONST_PICK_POSITIVE_RESULT " + "SYSRES_CONST_PICK_REQUISITE " + "SYSRES_CONST_PICK_REQUISITE_TYPE " + "SYSRES_CONST_PICK_TYPE_CHAR " + "SYSRES_CONST_PLAN_STATUS_REQUISITE_CODE " + "SYSRES_CONST_PLATFORM_VERSION_COMMENT " + "SYSRES_CONST_PLUGINS_SETTINGS_DESCRIPTION_REQUISITE_CODE " + "SYSRES_CONST_POSITIVE_PICK_VALUE " + "SYSRES_CONST_POWER_TO_CREATE_ACTION_CODE " + "SYSRES_CONST_POWER_TO_SIGN_ACTION_CODE " + "SYSRES_CONST_PRIORITY_REQUISITE_CODE " + "SYSRES_CONST_QUALIFIED_TASK_TYPE " + "SYSRES_CONST_QUALIFIED_TASK_TYPE_CODE " + "SYSRES_CONST_RECSTAT_REQUISITE_CODE " + "SYSRES_CONST_RED_LIFE_CYCLE_STAGE_FONT_COLOR " + "SYSRES_CONST_REF_ID_T_REF_TYPE_REQUISITE_CODE " + "SYSRES_CONST_REF_REQUISITE " + "SYSRES_CONST_REF_REQUISITE_TYPE " + "SYSRES_CONST_REF_REQUISITES_REFERENCE_CODE_SELECTED_REQUISITE " + "SYSRES_CONST_REFERENCE_RECORD_HISTORY_CREATE_ACTION_CODE " + "SYSRES_CONST_REFERENCE_RECORD_HISTORY_DELETE_ACTION_CODE " + "SYSRES_CONST_REFERENCE_RECORD_HISTORY_MODIFY_ACTION_CODE " + "SYSRES_CONST_REFERENCE_TYPE_CHAR " + "SYSRES_CONST_REFERENCE_TYPE_REQUISITE_NAME " + "SYSRES_CONST_REFERENCES_ADD_PARAMS_REQUISITE_CODE " + "SYSRES_CONST_REFERENCES_DISPLAY_REQUISITE_REQUISITE_CODE " + "SYSRES_CONST_REMOTE_SERVER_STATUS_WORKING " + "SYSRES_CONST_REMOTE_SERVER_TYPE_MAIN " + "SYSRES_CONST_REMOTE_SERVER_TYPE_SECONDARY " + "SYSRES_CONST_REMOTE_USER_FLAG_VALUE_CODE " + "SYSRES_CONST_REPORT_APP_EDITOR_INTERNAL " + "SYSRES_CONST_REPORT_BASE_REPORT_ID_REQUISITE_CODE " + "SYSRES_CONST_REPORT_BASE_REPORT_REQUISITE_CODE " + "SYSRES_CONST_REPORT_SCRIPT_REQUISITE_CODE " + "SYSRES_CONST_REPORT_TEMPLATE_REQUISITE_CODE " + "SYSRES_CONST_REPORT_VIEWER_CODE_REQUISITE_CODE " + "SYSRES_CONST_REQ_ALLOW_COMPONENT_DEFAULT_VALUE " + "SYSRES_CONST_REQ_ALLOW_RECORD_DEFAULT_VALUE " + "SYSRES_CONST_REQ_ALLOW_SERVER_COMPONENT_DEFAULT_VALUE " + "SYSRES_CONST_REQ_MODE_AVAILABLE_CODE " + "SYSRES_CONST_REQ_MODE_EDIT_CODE " + "SYSRES_CONST_REQ_MODE_HIDDEN_CODE " + "SYSRES_CONST_REQ_MODE_NOT_AVAILABLE_CODE " + "SYSRES_CONST_REQ_MODE_VIEW_CODE " + "SYSRES_CONST_REQ_NUMBER_REQUISITE_CODE " + "SYSRES_CONST_REQ_SECTION_VALUE " + "SYSRES_CONST_REQ_TYPE_VALUE " + "SYSRES_CONST_REQUISITE_FORMAT_BY_UNIT " + "SYSRES_CONST_REQUISITE_FORMAT_DATE_FULL " + "SYSRES_CONST_REQUISITE_FORMAT_DATE_TIME " + "SYSRES_CONST_REQUISITE_FORMAT_LEFT " + "SYSRES_CONST_REQUISITE_FORMAT_RIGHT " + "SYSRES_CONST_REQUISITE_FORMAT_WITHOUT_UNIT " + "SYSRES_CONST_REQUISITE_NUMBER_REQUISITE_CODE " + "SYSRES_CONST_REQUISITE_SECTION_ACTIONS " + "SYSRES_CONST_REQUISITE_SECTION_BUTTON " + "SYSRES_CONST_REQUISITE_SECTION_BUTTONS " + "SYSRES_CONST_REQUISITE_SECTION_CARD " + "SYSRES_CONST_REQUISITE_SECTION_TABLE " + "SYSRES_CONST_REQUISITE_SECTION_TABLE10 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE11 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE12 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE13 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE14 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE15 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE16 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE17 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE18 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE19 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE2 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE20 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE21 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE22 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE23 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE24 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE3 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE4 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE5 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE6 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE7 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE8 " + "SYSRES_CONST_REQUISITE_SECTION_TABLE9 " + "SYSRES_CONST_REQUISITES_PSEUDOREFERENCE_REQUISITE_NUMBER_REQUISITE_CODE " + "SYSRES_CONST_RIGHT_ALIGNMENT_CODE " + "SYSRES_CONST_ROLES_REFERENCE_CODE " + "SYSRES_CONST_ROUTE_STEP_AFTER_RUS " + "SYSRES_CONST_ROUTE_STEP_AND_CONDITION_RUS " + "SYSRES_CONST_ROUTE_STEP_OR_CONDITION_RUS " + "SYSRES_CONST_ROUTE_TYPE_COMPLEX " + "SYSRES_CONST_ROUTE_TYPE_PARALLEL " + "SYSRES_CONST_ROUTE_TYPE_SERIAL " + "SYSRES_CONST_SBDATASETDESC_NEGATIVE_VALUE " + "SYSRES_CONST_SBDATASETDESC_POSITIVE_VALUE " + "SYSRES_CONST_SBVIEWSDESC_POSITIVE_VALUE " + "SYSRES_CONST_SCRIPT_BLOCK_DESCRIPTION " + "SYSRES_CONST_SEARCH_BY_TEXT_REQUISITE_CODE " + "SYSRES_CONST_SEARCHES_COMPONENT_CONTENT " + "SYSRES_CONST_SEARCHES_CRITERIA_ACTION_NAME " + "SYSRES_CONST_SEARCHES_EDOC_CONTENT " + "SYSRES_CONST_SEARCHES_FOLDER_CONTENT " + "SYSRES_CONST_SEARCHES_JOB_CONTENT " + "SYSRES_CONST_SEARCHES_REFERENCE_CODE " + "SYSRES_CONST_SEARCHES_TASK_CONTENT " + "SYSRES_CONST_SECOND_CHAR " + "SYSRES_CONST_SECTION_REQUISITE_ACTIONS_VALUE " + "SYSRES_CONST_SECTION_REQUISITE_CARD_VALUE " + "SYSRES_CONST_SECTION_REQUISITE_CODE " + "SYSRES_CONST_SECTION_REQUISITE_DETAIL_1_VALUE " + "SYSRES_CONST_SECTION_REQUISITE_DETAIL_2_VALUE " + "SYSRES_CONST_SECTION_REQUISITE_DETAIL_3_VALUE " + "SYSRES_CONST_SECTION_REQUISITE_DETAIL_4_VALUE " + "SYSRES_CONST_SECTION_REQUISITE_DETAIL_5_VALUE " + "SYSRES_CONST_SECTION_REQUISITE_DETAIL_6_VALUE " + "SYSRES_CONST_SELECT_REFERENCE_MODE_NAME " + "SYSRES_CONST_SELECT_TYPE_SELECTABLE " + "SYSRES_CONST_SELECT_TYPE_SELECTABLE_ONLY_CHILD " + "SYSRES_CONST_SELECT_TYPE_SELECTABLE_WITH_CHILD " + "SYSRES_CONST_SELECT_TYPE_UNSLECTABLE " + "SYSRES_CONST_SERVER_TYPE_MAIN " + "SYSRES_CONST_SERVICE_USER_CATEGORY_FIELD_VALUE " + "SYSRES_CONST_SETTINGS_USER_REQUISITE_CODE " + "SYSRES_CONST_SIGNATURE_AND_ENCODE_CERTIFICATE_TYPE_CODE " + "SYSRES_CONST_SIGNATURE_CERTIFICATE_TYPE_CODE " + "SYSRES_CONST_SINGULAR_TITLE_REQUISITE_CODE " + "SYSRES_CONST_SQL_SERVER_AUTHENTIFICATION_FLAG_VALUE_CODE " + "SYSRES_CONST_SQL_SERVER_ENCODE_AUTHENTIFICATION_FLAG_VALUE_CODE " + "SYSRES_CONST_STANDART_ROUTE_REFERENCE_CODE " + "SYSRES_CONST_STANDART_ROUTE_REFERENCE_COMMENT_REQUISITE_CODE " + "SYSRES_CONST_STANDART_ROUTES_GROUPS_REFERENCE_CODE " + "SYSRES_CONST_STATE_REQ_NAME " + "SYSRES_CONST_STATE_REQUISITE_ACTIVE_VALUE " + "SYSRES_CONST_STATE_REQUISITE_CLOSED_VALUE " + "SYSRES_CONST_STATE_REQUISITE_CODE " + "SYSRES_CONST_STATIC_ROLE_TYPE_CODE " + "SYSRES_CONST_STATUS_PLAN_DEFAULT_VALUE " + "SYSRES_CONST_STATUS_VALUE_AUTOCLEANING " + "SYSRES_CONST_STATUS_VALUE_BLUE_SQUARE " + "SYSRES_CONST_STATUS_VALUE_COMPLETE " + "SYSRES_CONST_STATUS_VALUE_GREEN_SQUARE " + "SYSRES_CONST_STATUS_VALUE_ORANGE_SQUARE " + "SYSRES_CONST_STATUS_VALUE_PURPLE_SQUARE " + "SYSRES_CONST_STATUS_VALUE_RED_SQUARE " + "SYSRES_CONST_STATUS_VALUE_SUSPEND " + "SYSRES_CONST_STATUS_VALUE_YELLOW_SQUARE " + "SYSRES_CONST_STDROUTE_SHOW_TO_USERS_REQUISITE_CODE " + "SYSRES_CONST_STORAGE_TYPE_FILE " + "SYSRES_CONST_STORAGE_TYPE_SQL_SERVER " + "SYSRES_CONST_STR_REQUISITE " + "SYSRES_CONST_STRIKEOUT_LIFE_CYCLE_STAGE_DRAW_STYLE " + "SYSRES_CONST_STRING_FORMAT_LEFT_ALIGN_CHAR " + "SYSRES_CONST_STRING_FORMAT_RIGHT_ALIGN_CHAR " + "SYSRES_CONST_STRING_REQUISITE_CODE " + "SYSRES_CONST_STRING_REQUISITE_TYPE " + "SYSRES_CONST_STRING_TYPE_CHAR " + "SYSRES_CONST_SUBSTITUTES_PSEUDOREFERENCE_CODE " + "SYSRES_CONST_SUBTASK_BLOCK_DESCRIPTION " + "SYSRES_CONST_SYSTEM_SETTING_CURRENT_USER_PARAM_VALUE " + "SYSRES_CONST_SYSTEM_SETTING_EMPTY_VALUE_PARAM_VALUE " + "SYSRES_CONST_SYSTEM_VERSION_COMMENT " + "SYSRES_CONST_TASK_ACCESS_TYPE_ALL " + "SYSRES_CONST_TASK_ACCESS_TYPE_ALL_MEMBERS " + "SYSRES_CONST_TASK_ACCESS_TYPE_MANUAL " + "SYSRES_CONST_TASK_ENCODE_TYPE_CERTIFICATION " + "SYSRES_CONST_TASK_ENCODE_TYPE_CERTIFICATION_AND_PASSWORD " + "SYSRES_CONST_TASK_ENCODE_TYPE_NONE " + "SYSRES_CONST_TASK_ENCODE_TYPE_PASSWORD " + "SYSRES_CONST_TASK_ROUTE_ALL_CONDITION " + "SYSRES_CONST_TASK_ROUTE_AND_CONDITION " + "SYSRES_CONST_TASK_ROUTE_OR_CONDITION " + "SYSRES_CONST_TASK_STATE_ABORTED " + "SYSRES_CONST_TASK_STATE_COMPLETE " + "SYSRES_CONST_TASK_STATE_CONTINUED " + "SYSRES_CONST_TASK_STATE_CONTROL " + "SYSRES_CONST_TASK_STATE_INIT " + "SYSRES_CONST_TASK_STATE_WORKING " + "SYSRES_CONST_TASK_TITLE " + "SYSRES_CONST_TASK_TYPES_GROUPS_REFERENCE_CODE " + "SYSRES_CONST_TASK_TYPES_REFERENCE_CODE " + "SYSRES_CONST_TEMPLATES_REFERENCE_CODE " + "SYSRES_CONST_TEST_DATE_REQUISITE_NAME " + "SYSRES_CONST_TEST_DEV_DATABASE_NAME " + "SYSRES_CONST_TEST_DEV_SYSTEM_CODE " + "SYSRES_CONST_TEST_EDMS_DATABASE_NAME " + "SYSRES_CONST_TEST_EDMS_MAIN_CODE " + "SYSRES_CONST_TEST_EDMS_MAIN_DB_NAME " + "SYSRES_CONST_TEST_EDMS_SECOND_CODE " + "SYSRES_CONST_TEST_EDMS_SECOND_DB_NAME " + "SYSRES_CONST_TEST_EDMS_SYSTEM_CODE " + "SYSRES_CONST_TEST_NUMERIC_REQUISITE_NAME " + "SYSRES_CONST_TEXT_REQUISITE " + "SYSRES_CONST_TEXT_REQUISITE_CODE " + "SYSRES_CONST_TEXT_REQUISITE_TYPE " + "SYSRES_CONST_TEXT_TYPE_CHAR " + "SYSRES_CONST_TYPE_CODE_REQUISITE_CODE " + "SYSRES_CONST_TYPE_REQUISITE_CODE " + "SYSRES_CONST_UNDEFINED_LIFE_CYCLE_STAGE_FONT_COLOR " + "SYSRES_CONST_UNITS_SECTION_ID_REQUISITE_CODE " + "SYSRES_CONST_UNITS_SECTION_REQUISITE_CODE " + "SYSRES_CONST_UNOPERATING_RECORD_FLAG_VALUE_CODE " + "SYSRES_CONST_UNSTORED_DATA_REQUISITE_CODE " + "SYSRES_CONST_UNSTORED_DATA_REQUISITE_NAME " + "SYSRES_CONST_USE_ACCESS_TYPE_CODE " + "SYSRES_CONST_USE_ACCESS_TYPE_NAME " + "SYSRES_CONST_USER_ACCOUNT_TYPE_VALUE_CODE " + "SYSRES_CONST_USER_ADDITIONAL_INFORMATION_REQUISITE_CODE " + "SYSRES_CONST_USER_AND_GROUP_ID_FROM_PSEUDOREFERENCE_REQUISITE_CODE " + "SYSRES_CONST_USER_CATEGORY_NORMAL " + "SYSRES_CONST_USER_CERTIFICATE_REQUISITE_CODE " + "SYSRES_CONST_USER_CERTIFICATE_STATE_REQUISITE_CODE " + "SYSRES_CONST_USER_CERTIFICATE_SUBJECT_NAME_REQUISITE_CODE " + "SYSRES_CONST_USER_CERTIFICATE_THUMBPRINT_REQUISITE_CODE " + "SYSRES_CONST_USER_COMMON_CATEGORY " + "SYSRES_CONST_USER_COMMON_CATEGORY_CODE " + "SYSRES_CONST_USER_FULL_NAME_REQUISITE_CODE " + "SYSRES_CONST_USER_GROUP_TYPE_REQUISITE_CODE " + "SYSRES_CONST_USER_LOGIN_REQUISITE_CODE " + "SYSRES_CONST_USER_REMOTE_CONTROLLER_REQUISITE_CODE " + "SYSRES_CONST_USER_REMOTE_SYSTEM_REQUISITE_CODE " + "SYSRES_CONST_USER_RIGHTS_T_REQUISITE_CODE " + "SYSRES_CONST_USER_SERVER_NAME_REQUISITE_CODE " + "SYSRES_CONST_USER_SERVICE_CATEGORY " + "SYSRES_CONST_USER_SERVICE_CATEGORY_CODE " + "SYSRES_CONST_USER_STATUS_ADMINISTRATOR_CODE " + "SYSRES_CONST_USER_STATUS_ADMINISTRATOR_NAME " + "SYSRES_CONST_USER_STATUS_DEVELOPER_CODE " + "SYSRES_CONST_USER_STATUS_DEVELOPER_NAME " + "SYSRES_CONST_USER_STATUS_DISABLED_CODE " + "SYSRES_CONST_USER_STATUS_DISABLED_NAME " + "SYSRES_CONST_USER_STATUS_SYSTEM_DEVELOPER_CODE " + "SYSRES_CONST_USER_STATUS_USER_CODE " + "SYSRES_CONST_USER_STATUS_USER_NAME " + "SYSRES_CONST_USER_STATUS_USER_NAME_DEPRECATED " + "SYSRES_CONST_USER_TYPE_FIELD_VALUE_USER " + "SYSRES_CONST_USER_TYPE_REQUISITE_CODE " + "SYSRES_CONST_USERS_CONTROLLER_REQUISITE_CODE " + "SYSRES_CONST_USERS_IS_MAIN_SERVER_REQUISITE_CODE " + "SYSRES_CONST_USERS_REFERENCE_CODE " + "SYSRES_CONST_USERS_REGISTRATION_CERTIFICATES_ACTION_NAME " + "SYSRES_CONST_USERS_REQUISITE_CODE " + "SYSRES_CONST_USERS_SYSTEM_REQUISITE_CODE " + "SYSRES_CONST_USERS_USER_ACCESS_RIGHTS_TYPR_REQUISITE_CODE " + "SYSRES_CONST_USERS_USER_AUTHENTICATION_REQUISITE_CODE " + "SYSRES_CONST_USERS_USER_COMPONENT_REQUISITE_CODE " + "SYSRES_CONST_USERS_USER_GROUP_REQUISITE_CODE " + "SYSRES_CONST_USERS_VIEW_CERTIFICATES_ACTION_NAME " + "SYSRES_CONST_VIEW_DEFAULT_CODE " + "SYSRES_CONST_VIEW_DEFAULT_NAME " + "SYSRES_CONST_VIEWER_REQUISITE_CODE " + "SYSRES_CONST_WAITING_BLOCK_DESCRIPTION " + "SYSRES_CONST_WIZARD_FORM_LABEL_TEST_STRING  " + "SYSRES_CONST_WIZARD_QUERY_PARAM_HEIGHT_ETALON_STRING " + "SYSRES_CONST_WIZARD_REFERENCE_COMMENT_REQUISITE_CODE " + "SYSRES_CONST_WORK_RULES_DESCRIPTION_REQUISITE_CODE " + "SYSRES_CONST_WORK_TIME_CALENDAR_REFERENCE_CODE " + "SYSRES_CONST_WORK_WORKFLOW_HARD_ROUTE_TYPE_VALUE " + "SYSRES_CONST_WORK_WORKFLOW_HARD_ROUTE_TYPE_VALUE_CODE " + "SYSRES_CONST_WORK_WORKFLOW_HARD_ROUTE_TYPE_VALUE_CODE_RUS " + "SYSRES_CONST_WORK_WORKFLOW_SOFT_ROUTE_TYPE_VALUE_CODE_RUS " + "SYSRES_CONST_WORKFLOW_ROUTE_TYPR_HARD " + "SYSRES_CONST_WORKFLOW_ROUTE_TYPR_SOFT " + "SYSRES_CONST_XML_ENCODING " + "SYSRES_CONST_XREC_STAT_REQUISITE_CODE " + "SYSRES_CONST_XRECID_FIELD_NAME " + "SYSRES_CONST_YES " + "SYSRES_CONST_YES_NO_2_REQUISITE_CODE " + "SYSRES_CONST_YES_NO_REQUISITE_CODE " + "SYSRES_CONST_YES_NO_T_REF_TYPE_REQUISITE_CODE " + "SYSRES_CONST_YES_PICK_VALUE " + "SYSRES_CONST_YES_VALUE ";
     const base_constants = "CR FALSE nil NO_VALUE NULL TAB TRUE YES_VALUE ";
     const base_group_name_constants = "ADMINISTRATORS_GROUP_NAME CUSTOMIZERS_GROUP_NAME DEVELOPERS_GROUP_NAME SERVICE_USERS_GROUP_NAME ";
@@ -18939,7 +19223,7 @@ var require_isbl = __commonJS((exports, module) => {
     const requisite_ISBCertificateType_values_constants = "CERTIFICATE_TYPE_ENCRYPT " + "CERTIFICATE_TYPE_SIGN " + "CERTIFICATE_TYPE_SIGN_AND_ENCRYPT ";
     const requisite_ISBEDocStorageType_values_constants = "STORAGE_TYPE_FILE " + "STORAGE_TYPE_NAS_CIFS " + "STORAGE_TYPE_SAPERION " + "STORAGE_TYPE_SQL_SERVER ";
     const requisite_compType2_values_constants = "COMPTYPE2_REQUISITE_DOCUMENTS_VALUE " + "COMPTYPE2_REQUISITE_TASKS_VALUE " + "COMPTYPE2_REQUISITE_FOLDERS_VALUE " + "COMPTYPE2_REQUISITE_REFERENCES_VALUE ";
-    const requisite_name_constants = "SYSREQ_CODE " + "SYSREQ_COMPTYPE2 " + "SYSREQ_CONST_AVAILABLE_FOR_WEB " + "SYSREQ_CONST_COMMON_CODE " + "SYSREQ_CONST_COMMON_VALUE " + "SYSREQ_CONST_FIRM_CODE " + "SYSREQ_CONST_FIRM_STATUS " + "SYSREQ_CONST_FIRM_VALUE " + "SYSREQ_CONST_SERVER_STATUS " + "SYSREQ_CONTENTS " + "SYSREQ_DATE_OPEN " + "SYSREQ_DATE_CLOSE " + "SYSREQ_DESCRIPTION " + "SYSREQ_DESCRIPTION_LOCALIZE_ID " + "SYSREQ_DOUBLE " + "SYSREQ_EDOC_ACCESS_TYPE " + "SYSREQ_EDOC_AUTHOR " + "SYSREQ_EDOC_CREATED " + "SYSREQ_EDOC_DELEGATE_RIGHTS_REQUISITE_CODE " + "SYSREQ_EDOC_EDITOR " + "SYSREQ_EDOC_ENCODE_TYPE " + "SYSREQ_EDOC_ENCRYPTION_PLUGIN_NAME " + "SYSREQ_EDOC_ENCRYPTION_PLUGIN_VERSION " + "SYSREQ_EDOC_EXPORT_DATE " + "SYSREQ_EDOC_EXPORTER " + "SYSREQ_EDOC_KIND " + "SYSREQ_EDOC_LIFE_STAGE_NAME " + "SYSREQ_EDOC_LOCKED_FOR_SERVER_CODE " + "SYSREQ_EDOC_MODIFIED " + "SYSREQ_EDOC_NAME " + "SYSREQ_EDOC_NOTE " + "SYSREQ_EDOC_QUALIFIED_ID " + "SYSREQ_EDOC_SESSION_KEY " + "SYSREQ_EDOC_SESSION_KEY_ENCRYPTION_PLUGIN_NAME " + "SYSREQ_EDOC_SESSION_KEY_ENCRYPTION_PLUGIN_VERSION " + "SYSREQ_EDOC_SIGNATURE_TYPE " + "SYSREQ_EDOC_SIGNED " + "SYSREQ_EDOC_STORAGE " + "SYSREQ_EDOC_STORAGES_ARCHIVE_STORAGE " + "SYSREQ_EDOC_STORAGES_CHECK_RIGHTS " + "SYSREQ_EDOC_STORAGES_COMPUTER_NAME " + "SYSREQ_EDOC_STORAGES_EDIT_IN_STORAGE " + "SYSREQ_EDOC_STORAGES_EXECUTIVE_STORAGE " + "SYSREQ_EDOC_STORAGES_FUNCTION " + "SYSREQ_EDOC_STORAGES_INITIALIZED " + "SYSREQ_EDOC_STORAGES_LOCAL_PATH " + "SYSREQ_EDOC_STORAGES_SAPERION_DATABASE_NAME " + "SYSREQ_EDOC_STORAGES_SEARCH_BY_TEXT " + "SYSREQ_EDOC_STORAGES_SERVER_NAME " + "SYSREQ_EDOC_STORAGES_SHARED_SOURCE_NAME " + "SYSREQ_EDOC_STORAGES_TYPE " + "SYSREQ_EDOC_TEXT_MODIFIED " + "SYSREQ_EDOC_TYPE_ACT_CODE " + "SYSREQ_EDOC_TYPE_ACT_DESCRIPTION " + "SYSREQ_EDOC_TYPE_ACT_DESCRIPTION_LOCALIZE_ID " + "SYSREQ_EDOC_TYPE_ACT_ON_EXECUTE " + "SYSREQ_EDOC_TYPE_ACT_ON_EXECUTE_EXISTS " + "SYSREQ_EDOC_TYPE_ACT_SECTION " + "SYSREQ_EDOC_TYPE_ADD_PARAMS " + "SYSREQ_EDOC_TYPE_COMMENT " + "SYSREQ_EDOC_TYPE_EVENT_TEXT " + "SYSREQ_EDOC_TYPE_NAME_IN_SINGULAR " + "SYSREQ_EDOC_TYPE_NAME_IN_SINGULAR_LOCALIZE_ID " + "SYSREQ_EDOC_TYPE_NAME_LOCALIZE_ID " + "SYSREQ_EDOC_TYPE_NUMERATION_METHOD " + "SYSREQ_EDOC_TYPE_PSEUDO_REQUISITE_CODE " + "SYSREQ_EDOC_TYPE_REQ_CODE " + "SYSREQ_EDOC_TYPE_REQ_DESCRIPTION " + "SYSREQ_EDOC_TYPE_REQ_DESCRIPTION_LOCALIZE_ID " + "SYSREQ_EDOC_TYPE_REQ_IS_LEADING " + "SYSREQ_EDOC_TYPE_REQ_IS_REQUIRED " + "SYSREQ_EDOC_TYPE_REQ_NUMBER " + "SYSREQ_EDOC_TYPE_REQ_ON_CHANGE " + "SYSREQ_EDOC_TYPE_REQ_ON_CHANGE_EXISTS " + "SYSREQ_EDOC_TYPE_REQ_ON_SELECT " + "SYSREQ_EDOC_TYPE_REQ_ON_SELECT_KIND " + "SYSREQ_EDOC_TYPE_REQ_SECTION " + "SYSREQ_EDOC_TYPE_VIEW_CARD " + "SYSREQ_EDOC_TYPE_VIEW_CODE " + "SYSREQ_EDOC_TYPE_VIEW_COMMENT " + "SYSREQ_EDOC_TYPE_VIEW_IS_MAIN " + "SYSREQ_EDOC_TYPE_VIEW_NAME " + "SYSREQ_EDOC_TYPE_VIEW_NAME_LOCALIZE_ID " + "SYSREQ_EDOC_VERSION_AUTHOR " + "SYSREQ_EDOC_VERSION_CRC " + "SYSREQ_EDOC_VERSION_DATA " + "SYSREQ_EDOC_VERSION_EDITOR " + "SYSREQ_EDOC_VERSION_EXPORT_DATE " + "SYSREQ_EDOC_VERSION_EXPORTER " + "SYSREQ_EDOC_VERSION_HIDDEN " + "SYSREQ_EDOC_VERSION_LIFE_STAGE " + "SYSREQ_EDOC_VERSION_MODIFIED " + "SYSREQ_EDOC_VERSION_NOTE " + "SYSREQ_EDOC_VERSION_SIGNATURE_TYPE " + "SYSREQ_EDOC_VERSION_SIGNED " + "SYSREQ_EDOC_VERSION_SIZE " + "SYSREQ_EDOC_VERSION_SOURCE " + "SYSREQ_EDOC_VERSION_TEXT_MODIFIED " + "SYSREQ_EDOCKIND_DEFAULT_VERSION_STATE_CODE " + "SYSREQ_FOLDER_KIND " + "SYSREQ_FUNC_CATEGORY " + "SYSREQ_FUNC_COMMENT " + "SYSREQ_FUNC_GROUP " + "SYSREQ_FUNC_GROUP_COMMENT " + "SYSREQ_FUNC_GROUP_NUMBER " + "SYSREQ_FUNC_HELP " + "SYSREQ_FUNC_PARAM_DEF_VALUE " + "SYSREQ_FUNC_PARAM_IDENT " + "SYSREQ_FUNC_PARAM_NUMBER " + "SYSREQ_FUNC_PARAM_TYPE " + "SYSREQ_FUNC_TEXT " + "SYSREQ_GROUP_CATEGORY " + "SYSREQ_ID " + "SYSREQ_LAST_UPDATE " + "SYSREQ_LEADER_REFERENCE " + "SYSREQ_LINE_NUMBER " + "SYSREQ_MAIN_RECORD_ID " + "SYSREQ_NAME " + "SYSREQ_NAME_LOCALIZE_ID " + "SYSREQ_NOTE " + "SYSREQ_ORIGINAL_RECORD " + "SYSREQ_OUR_FIRM " + "SYSREQ_PROFILING_SETTINGS_BATCH_LOGING " + "SYSREQ_PROFILING_SETTINGS_BATCH_SIZE " + "SYSREQ_PROFILING_SETTINGS_PROFILING_ENABLED " + "SYSREQ_PROFILING_SETTINGS_SQL_PROFILING_ENABLED " + "SYSREQ_PROFILING_SETTINGS_START_LOGGED " + "SYSREQ_RECORD_STATUS " + "SYSREQ_REF_REQ_FIELD_NAME " + "SYSREQ_REF_REQ_FORMAT " + "SYSREQ_REF_REQ_GENERATED " + "SYSREQ_REF_REQ_LENGTH " + "SYSREQ_REF_REQ_PRECISION " + "SYSREQ_REF_REQ_REFERENCE " + "SYSREQ_REF_REQ_SECTION " + "SYSREQ_REF_REQ_STORED " + "SYSREQ_REF_REQ_TOKENS " + "SYSREQ_REF_REQ_TYPE " + "SYSREQ_REF_REQ_VIEW " + "SYSREQ_REF_TYPE_ACT_CODE " + "SYSREQ_REF_TYPE_ACT_DESCRIPTION " + "SYSREQ_REF_TYPE_ACT_DESCRIPTION_LOCALIZE_ID " + "SYSREQ_REF_TYPE_ACT_ON_EXECUTE " + "SYSREQ_REF_TYPE_ACT_ON_EXECUTE_EXISTS " + "SYSREQ_REF_TYPE_ACT_SECTION " + "SYSREQ_REF_TYPE_ADD_PARAMS " + "SYSREQ_REF_TYPE_COMMENT " + "SYSREQ_REF_TYPE_COMMON_SETTINGS " + "SYSREQ_REF_TYPE_DISPLAY_REQUISITE_NAME " + "SYSREQ_REF_TYPE_EVENT_TEXT " + "SYSREQ_REF_TYPE_MAIN_LEADING_REF " + "SYSREQ_REF_TYPE_NAME_IN_SINGULAR " + "SYSREQ_REF_TYPE_NAME_IN_SINGULAR_LOCALIZE_ID " + "SYSREQ_REF_TYPE_NAME_LOCALIZE_ID " + "SYSREQ_REF_TYPE_NUMERATION_METHOD " + "SYSREQ_REF_TYPE_REQ_CODE " + "SYSREQ_REF_TYPE_REQ_DESCRIPTION " + "SYSREQ_REF_TYPE_REQ_DESCRIPTION_LOCALIZE_ID " + "SYSREQ_REF_TYPE_REQ_IS_CONTROL " + "SYSREQ_REF_TYPE_REQ_IS_FILTER " + "SYSREQ_REF_TYPE_REQ_IS_LEADING " + "SYSREQ_REF_TYPE_REQ_IS_REQUIRED " + "SYSREQ_REF_TYPE_REQ_NUMBER " + "SYSREQ_REF_TYPE_REQ_ON_CHANGE " + "SYSREQ_REF_TYPE_REQ_ON_CHANGE_EXISTS " + "SYSREQ_REF_TYPE_REQ_ON_SELECT " + "SYSREQ_REF_TYPE_REQ_ON_SELECT_KIND " + "SYSREQ_REF_TYPE_REQ_SECTION " + "SYSREQ_REF_TYPE_VIEW_CARD " + "SYSREQ_REF_TYPE_VIEW_CODE " + "SYSREQ_REF_TYPE_VIEW_COMMENT " + "SYSREQ_REF_TYPE_VIEW_IS_MAIN " + "SYSREQ_REF_TYPE_VIEW_NAME " + "SYSREQ_REF_TYPE_VIEW_NAME_LOCALIZE_ID " + "SYSREQ_REFERENCE_TYPE_ID " + "SYSREQ_STATE " + "SYSREQ_STAT\u0415 " + "SYSREQ_SYSTEM_SETTINGS_VALUE " + "SYSREQ_TYPE " + "SYSREQ_UNIT " + "SYSREQ_UNIT_ID " + "SYSREQ_USER_GROUPS_GROUP_FULL_NAME " + "SYSREQ_USER_GROUPS_GROUP_NAME " + "SYSREQ_USER_GROUPS_GROUP_SERVER_NAME " + "SYSREQ_USERS_ACCESS_RIGHTS " + "SYSREQ_USERS_AUTHENTICATION " + "SYSREQ_USERS_CATEGORY " + "SYSREQ_USERS_COMPONENT " + "SYSREQ_USERS_COMPONENT_USER_IS_PUBLIC " + "SYSREQ_USERS_DOMAIN " + "SYSREQ_USERS_FULL_USER_NAME " + "SYSREQ_USERS_GROUP " + "SYSREQ_USERS_IS_MAIN_SERVER " + "SYSREQ_USERS_LOGIN " + "SYSREQ_USERS_REFERENCE_USER_IS_PUBLIC " + "SYSREQ_USERS_STATUS " + "SYSREQ_USERS_USER_CERTIFICATE " + "SYSREQ_USERS_USER_CERTIFICATE_INFO " + "SYSREQ_USERS_USER_CERTIFICATE_PLUGIN_NAME " + "SYSREQ_USERS_USER_CERTIFICATE_PLUGIN_VERSION " + "SYSREQ_USERS_USER_CERTIFICATE_STATE " + "SYSREQ_USERS_USER_CERTIFICATE_SUBJECT_NAME " + "SYSREQ_USERS_USER_CERTIFICATE_THUMBPRINT " + "SYSREQ_USERS_USER_DEFAULT_CERTIFICATE " + "SYSREQ_USERS_USER_DESCRIPTION " + "SYSREQ_USERS_USER_GLOBAL_NAME " + "SYSREQ_USERS_USER_LOGIN " + "SYSREQ_USERS_USER_MAIN_SERVER " + "SYSREQ_USERS_USER_TYPE " + "SYSREQ_WORK_RULES_FOLDER_ID ";
+    const requisite_name_constants = "SYSREQ_CODE " + "SYSREQ_COMPTYPE2 " + "SYSREQ_CONST_AVAILABLE_FOR_WEB " + "SYSREQ_CONST_COMMON_CODE " + "SYSREQ_CONST_COMMON_VALUE " + "SYSREQ_CONST_FIRM_CODE " + "SYSREQ_CONST_FIRM_STATUS " + "SYSREQ_CONST_FIRM_VALUE " + "SYSREQ_CONST_SERVER_STATUS " + "SYSREQ_CONTENTS " + "SYSREQ_DATE_OPEN " + "SYSREQ_DATE_CLOSE " + "SYSREQ_DESCRIPTION " + "SYSREQ_DESCRIPTION_LOCALIZE_ID " + "SYSREQ_DOUBLE " + "SYSREQ_EDOC_ACCESS_TYPE " + "SYSREQ_EDOC_AUTHOR " + "SYSREQ_EDOC_CREATED " + "SYSREQ_EDOC_DELEGATE_RIGHTS_REQUISITE_CODE " + "SYSREQ_EDOC_EDITOR " + "SYSREQ_EDOC_ENCODE_TYPE " + "SYSREQ_EDOC_ENCRYPTION_PLUGIN_NAME " + "SYSREQ_EDOC_ENCRYPTION_PLUGIN_VERSION " + "SYSREQ_EDOC_EXPORT_DATE " + "SYSREQ_EDOC_EXPORTER " + "SYSREQ_EDOC_KIND " + "SYSREQ_EDOC_LIFE_STAGE_NAME " + "SYSREQ_EDOC_LOCKED_FOR_SERVER_CODE " + "SYSREQ_EDOC_MODIFIED " + "SYSREQ_EDOC_NAME " + "SYSREQ_EDOC_NOTE " + "SYSREQ_EDOC_QUALIFIED_ID " + "SYSREQ_EDOC_SESSION_KEY " + "SYSREQ_EDOC_SESSION_KEY_ENCRYPTION_PLUGIN_NAME " + "SYSREQ_EDOC_SESSION_KEY_ENCRYPTION_PLUGIN_VERSION " + "SYSREQ_EDOC_SIGNATURE_TYPE " + "SYSREQ_EDOC_SIGNED " + "SYSREQ_EDOC_STORAGE " + "SYSREQ_EDOC_STORAGES_ARCHIVE_STORAGE " + "SYSREQ_EDOC_STORAGES_CHECK_RIGHTS " + "SYSREQ_EDOC_STORAGES_COMPUTER_NAME " + "SYSREQ_EDOC_STORAGES_EDIT_IN_STORAGE " + "SYSREQ_EDOC_STORAGES_EXECUTIVE_STORAGE " + "SYSREQ_EDOC_STORAGES_FUNCTION " + "SYSREQ_EDOC_STORAGES_INITIALIZED " + "SYSREQ_EDOC_STORAGES_LOCAL_PATH " + "SYSREQ_EDOC_STORAGES_SAPERION_DATABASE_NAME " + "SYSREQ_EDOC_STORAGES_SEARCH_BY_TEXT " + "SYSREQ_EDOC_STORAGES_SERVER_NAME " + "SYSREQ_EDOC_STORAGES_SHARED_SOURCE_NAME " + "SYSREQ_EDOC_STORAGES_TYPE " + "SYSREQ_EDOC_TEXT_MODIFIED " + "SYSREQ_EDOC_TYPE_ACT_CODE " + "SYSREQ_EDOC_TYPE_ACT_DESCRIPTION " + "SYSREQ_EDOC_TYPE_ACT_DESCRIPTION_LOCALIZE_ID " + "SYSREQ_EDOC_TYPE_ACT_ON_EXECUTE " + "SYSREQ_EDOC_TYPE_ACT_ON_EXECUTE_EXISTS " + "SYSREQ_EDOC_TYPE_ACT_SECTION " + "SYSREQ_EDOC_TYPE_ADD_PARAMS " + "SYSREQ_EDOC_TYPE_COMMENT " + "SYSREQ_EDOC_TYPE_EVENT_TEXT " + "SYSREQ_EDOC_TYPE_NAME_IN_SINGULAR " + "SYSREQ_EDOC_TYPE_NAME_IN_SINGULAR_LOCALIZE_ID " + "SYSREQ_EDOC_TYPE_NAME_LOCALIZE_ID " + "SYSREQ_EDOC_TYPE_NUMERATION_METHOD " + "SYSREQ_EDOC_TYPE_PSEUDO_REQUISITE_CODE " + "SYSREQ_EDOC_TYPE_REQ_CODE " + "SYSREQ_EDOC_TYPE_REQ_DESCRIPTION " + "SYSREQ_EDOC_TYPE_REQ_DESCRIPTION_LOCALIZE_ID " + "SYSREQ_EDOC_TYPE_REQ_IS_LEADING " + "SYSREQ_EDOC_TYPE_REQ_IS_REQUIRED " + "SYSREQ_EDOC_TYPE_REQ_NUMBER " + "SYSREQ_EDOC_TYPE_REQ_ON_CHANGE " + "SYSREQ_EDOC_TYPE_REQ_ON_CHANGE_EXISTS " + "SYSREQ_EDOC_TYPE_REQ_ON_SELECT " + "SYSREQ_EDOC_TYPE_REQ_ON_SELECT_KIND " + "SYSREQ_EDOC_TYPE_REQ_SECTION " + "SYSREQ_EDOC_TYPE_VIEW_CARD " + "SYSREQ_EDOC_TYPE_VIEW_CODE " + "SYSREQ_EDOC_TYPE_VIEW_COMMENT " + "SYSREQ_EDOC_TYPE_VIEW_IS_MAIN " + "SYSREQ_EDOC_TYPE_VIEW_NAME " + "SYSREQ_EDOC_TYPE_VIEW_NAME_LOCALIZE_ID " + "SYSREQ_EDOC_VERSION_AUTHOR " + "SYSREQ_EDOC_VERSION_CRC " + "SYSREQ_EDOC_VERSION_DATA " + "SYSREQ_EDOC_VERSION_EDITOR " + "SYSREQ_EDOC_VERSION_EXPORT_DATE " + "SYSREQ_EDOC_VERSION_EXPORTER " + "SYSREQ_EDOC_VERSION_HIDDEN " + "SYSREQ_EDOC_VERSION_LIFE_STAGE " + "SYSREQ_EDOC_VERSION_MODIFIED " + "SYSREQ_EDOC_VERSION_NOTE " + "SYSREQ_EDOC_VERSION_SIGNATURE_TYPE " + "SYSREQ_EDOC_VERSION_SIGNED " + "SYSREQ_EDOC_VERSION_SIZE " + "SYSREQ_EDOC_VERSION_SOURCE " + "SYSREQ_EDOC_VERSION_TEXT_MODIFIED " + "SYSREQ_EDOCKIND_DEFAULT_VERSION_STATE_CODE " + "SYSREQ_FOLDER_KIND " + "SYSREQ_FUNC_CATEGORY " + "SYSREQ_FUNC_COMMENT " + "SYSREQ_FUNC_GROUP " + "SYSREQ_FUNC_GROUP_COMMENT " + "SYSREQ_FUNC_GROUP_NUMBER " + "SYSREQ_FUNC_HELP " + "SYSREQ_FUNC_PARAM_DEF_VALUE " + "SYSREQ_FUNC_PARAM_IDENT " + "SYSREQ_FUNC_PARAM_NUMBER " + "SYSREQ_FUNC_PARAM_TYPE " + "SYSREQ_FUNC_TEXT " + "SYSREQ_GROUP_CATEGORY " + "SYSREQ_ID " + "SYSREQ_LAST_UPDATE " + "SYSREQ_LEADER_REFERENCE " + "SYSREQ_LINE_NUMBER " + "SYSREQ_MAIN_RECORD_ID " + "SYSREQ_NAME " + "SYSREQ_NAME_LOCALIZE_ID " + "SYSREQ_NOTE " + "SYSREQ_ORIGINAL_RECORD " + "SYSREQ_OUR_FIRM " + "SYSREQ_PROFILING_SETTINGS_BATCH_LOGING " + "SYSREQ_PROFILING_SETTINGS_BATCH_SIZE " + "SYSREQ_PROFILING_SETTINGS_PROFILING_ENABLED " + "SYSREQ_PROFILING_SETTINGS_SQL_PROFILING_ENABLED " + "SYSREQ_PROFILING_SETTINGS_START_LOGGED " + "SYSREQ_RECORD_STATUS " + "SYSREQ_REF_REQ_FIELD_NAME " + "SYSREQ_REF_REQ_FORMAT " + "SYSREQ_REF_REQ_GENERATED " + "SYSREQ_REF_REQ_LENGTH " + "SYSREQ_REF_REQ_PRECISION " + "SYSREQ_REF_REQ_REFERENCE " + "SYSREQ_REF_REQ_SECTION " + "SYSREQ_REF_REQ_STORED " + "SYSREQ_REF_REQ_TOKENS " + "SYSREQ_REF_REQ_TYPE " + "SYSREQ_REF_REQ_VIEW " + "SYSREQ_REF_TYPE_ACT_CODE " + "SYSREQ_REF_TYPE_ACT_DESCRIPTION " + "SYSREQ_REF_TYPE_ACT_DESCRIPTION_LOCALIZE_ID " + "SYSREQ_REF_TYPE_ACT_ON_EXECUTE " + "SYSREQ_REF_TYPE_ACT_ON_EXECUTE_EXISTS " + "SYSREQ_REF_TYPE_ACT_SECTION " + "SYSREQ_REF_TYPE_ADD_PARAMS " + "SYSREQ_REF_TYPE_COMMENT " + "SYSREQ_REF_TYPE_COMMON_SETTINGS " + "SYSREQ_REF_TYPE_DISPLAY_REQUISITE_NAME " + "SYSREQ_REF_TYPE_EVENT_TEXT " + "SYSREQ_REF_TYPE_MAIN_LEADING_REF " + "SYSREQ_REF_TYPE_NAME_IN_SINGULAR " + "SYSREQ_REF_TYPE_NAME_IN_SINGULAR_LOCALIZE_ID " + "SYSREQ_REF_TYPE_NAME_LOCALIZE_ID " + "SYSREQ_REF_TYPE_NUMERATION_METHOD " + "SYSREQ_REF_TYPE_REQ_CODE " + "SYSREQ_REF_TYPE_REQ_DESCRIPTION " + "SYSREQ_REF_TYPE_REQ_DESCRIPTION_LOCALIZE_ID " + "SYSREQ_REF_TYPE_REQ_IS_CONTROL " + "SYSREQ_REF_TYPE_REQ_IS_FILTER " + "SYSREQ_REF_TYPE_REQ_IS_LEADING " + "SYSREQ_REF_TYPE_REQ_IS_REQUIRED " + "SYSREQ_REF_TYPE_REQ_NUMBER " + "SYSREQ_REF_TYPE_REQ_ON_CHANGE " + "SYSREQ_REF_TYPE_REQ_ON_CHANGE_EXISTS " + "SYSREQ_REF_TYPE_REQ_ON_SELECT " + "SYSREQ_REF_TYPE_REQ_ON_SELECT_KIND " + "SYSREQ_REF_TYPE_REQ_SECTION " + "SYSREQ_REF_TYPE_VIEW_CARD " + "SYSREQ_REF_TYPE_VIEW_CODE " + "SYSREQ_REF_TYPE_VIEW_COMMENT " + "SYSREQ_REF_TYPE_VIEW_IS_MAIN " + "SYSREQ_REF_TYPE_VIEW_NAME " + "SYSREQ_REF_TYPE_VIEW_NAME_LOCALIZE_ID " + "SYSREQ_REFERENCE_TYPE_ID " + "SYSREQ_STATE " + "SYSREQ_STATЕ " + "SYSREQ_SYSTEM_SETTINGS_VALUE " + "SYSREQ_TYPE " + "SYSREQ_UNIT " + "SYSREQ_UNIT_ID " + "SYSREQ_USER_GROUPS_GROUP_FULL_NAME " + "SYSREQ_USER_GROUPS_GROUP_NAME " + "SYSREQ_USER_GROUPS_GROUP_SERVER_NAME " + "SYSREQ_USERS_ACCESS_RIGHTS " + "SYSREQ_USERS_AUTHENTICATION " + "SYSREQ_USERS_CATEGORY " + "SYSREQ_USERS_COMPONENT " + "SYSREQ_USERS_COMPONENT_USER_IS_PUBLIC " + "SYSREQ_USERS_DOMAIN " + "SYSREQ_USERS_FULL_USER_NAME " + "SYSREQ_USERS_GROUP " + "SYSREQ_USERS_IS_MAIN_SERVER " + "SYSREQ_USERS_LOGIN " + "SYSREQ_USERS_REFERENCE_USER_IS_PUBLIC " + "SYSREQ_USERS_STATUS " + "SYSREQ_USERS_USER_CERTIFICATE " + "SYSREQ_USERS_USER_CERTIFICATE_INFO " + "SYSREQ_USERS_USER_CERTIFICATE_PLUGIN_NAME " + "SYSREQ_USERS_USER_CERTIFICATE_PLUGIN_VERSION " + "SYSREQ_USERS_USER_CERTIFICATE_STATE " + "SYSREQ_USERS_USER_CERTIFICATE_SUBJECT_NAME " + "SYSREQ_USERS_USER_CERTIFICATE_THUMBPRINT " + "SYSREQ_USERS_USER_DEFAULT_CERTIFICATE " + "SYSREQ_USERS_USER_DESCRIPTION " + "SYSREQ_USERS_USER_GLOBAL_NAME " + "SYSREQ_USERS_USER_LOGIN " + "SYSREQ_USERS_USER_MAIN_SERVER " + "SYSREQ_USERS_USER_TYPE " + "SYSREQ_WORK_RULES_FOLDER_ID ";
     const result_constants = "RESULT_VAR_NAME RESULT_VAR_NAME_ENG ";
     const rule_identification_constants = "AUTO_NUMERATION_RULE_ID " + "CANT_CHANGE_ID_REQUISITE_RULE_ID " + "CANT_CHANGE_OURFIRM_REQUISITE_RULE_ID " + "CHECK_CHANGING_REFERENCE_RECORD_USE_RULE_ID " + "CHECK_CODE_REQUISITE_RULE_ID " + "CHECK_DELETING_REFERENCE_RECORD_USE_RULE_ID " + "CHECK_FILTRATER_CHANGES_RULE_ID " + "CHECK_RECORD_INTERVAL_RULE_ID " + "CHECK_REFERENCE_INTERVAL_RULE_ID " + "CHECK_REQUIRED_DATA_FULLNESS_RULE_ID " + "CHECK_REQUIRED_REQUISITES_FULLNESS_RULE_ID " + "MAKE_RECORD_UNRATIFIED_RULE_ID " + "RESTORE_AUTO_NUMERATION_RULE_ID " + "SET_FIRM_CONTEXT_FROM_RECORD_RULE_ID " + "SET_FIRST_RECORD_IN_LIST_FORM_RULE_ID " + "SET_IDSPS_VALUE_RULE_ID " + "SET_NEXT_CODE_VALUE_RULE_ID " + "SET_OURFIRM_BOUNDS_RULE_ID " + "SET_OURFIRM_REQUISITE_RULE_ID ";
     const script_block_properties_constants = "SCRIPT_BLOCK_AFTER_FINISH_EVENT " + "SCRIPT_BLOCK_BEFORE_START_EVENT " + "SCRIPT_BLOCK_EXECUTION_RESULTS_PROPERTY " + "SCRIPT_BLOCK_NAME_PROPERTY " + "SCRIPT_BLOCK_SCRIPT_PROPERTY ";
@@ -19045,8 +19329,8 @@ var require_isbl = __commonJS((exports, module) => {
     const TWorkState = "wsInit " + "wsRunning " + "wsDone " + "wsControlled " + "wsAborted " + "wsContinued ";
     const TWorkTextBuildingMode = "wtmFull " + "wtmFromCurrent " + "wtmOnlyCurrent ";
     const ENUMS = TAccountType + TActionEnabledMode + TAddPosition + TAlignment + TAreaShowMode + TCertificateInvalidationReason + TCertificateType + TCheckListBoxItemState + TCloseOnEsc + TCompType + TConditionFormat + TConnectionIntent + TContentKind + TControlType + TCriterionContentType + TCultureType + TDataSetEventType + TDataSetState + TDateFormatType + TDateOffsetType + TDateTimeKind + TDeaAccessRights + TDocumentDefaultAction + TEditMode + TEditorCloseObservType + TEdmsApplicationAction + TEDocumentLockType + TEDocumentStepShowMode + TEDocumentStepVersionType + TEDocumentStorageFunction + TEDocumentStorageType + TEDocumentVersionSourceType + TEDocumentVersionState + TEncodeType + TExceptionCategory + TExportedSignaturesType + TExportedVersionType + TFieldDataType + TFolderType + TGridRowHeight + THyperlinkType + TImageFileFormat + TImageMode + TImageType + TInplaceHintKind + TISBLContext + TItemShow + TJobKind + TJoinType + TLabelPos + TLicensingType + TLifeCycleStageFontColor + TLifeCycleStageFontStyle + TLockableDevelopmentComponentType + TMaxRecordCountRestrictionType + TRangeValueType + TRelativeDate + TReportDestination + TReqDataType + TRequisiteEventType + TSBTimeType + TSearchShowMode + TSelectMode + TSignatureType + TSignerContentType + TStringsSortType + TStringValueType + TStructuredObjectAttributeType + TTaskAbortReason + TTextValueType + TUserObjectStatus + TUserType + TValuesBuildType + TViewMode + TViewSelectionMode + TWizardActionType + TWizardFormElementProperty + TWizardFormElementType + TWizardParamType + TWizardStepResult + TWizardStepType + TWorkAccessType + TWorkflowBlockType + TWorkflowDataType + TWorkImportance + TWorkRouteType + TWorkState + TWorkTextBuildingMode;
-    const system_functions = "AddSubString " + "AdjustLineBreaks " + "AmountInWords " + "Analysis " + "ArrayDimCount " + "ArrayHighBound " + "ArrayLowBound " + "ArrayOf " + "ArrayReDim " + "Assert " + "Assigned " + "BeginOfMonth " + "BeginOfPeriod " + "BuildProfilingOperationAnalysis " + "CallProcedure " + "CanReadFile " + "CArrayElement " + "CDataSetRequisite " + "ChangeDate " + "ChangeReferenceDataset " + "Char " + "CharPos " + "CheckParam " + "CheckParamValue " + "CompareStrings " + "ConstantExists " + "ControlState " + "ConvertDateStr " + "Copy " + "CopyFile " + "CreateArray " + "CreateCachedReference " + "CreateConnection " + "CreateDialog " + "CreateDualListDialog " + "CreateEditor " + "CreateException " + "CreateFile " + "CreateFolderDialog " + "CreateInputDialog " + "CreateLinkFile " + "CreateList " + "CreateLock " + "CreateMemoryDataSet " + "CreateObject " + "CreateOpenDialog " + "CreateProgress " + "CreateQuery " + "CreateReference " + "CreateReport " + "CreateSaveDialog " + "CreateScript " + "CreateSQLPivotFunction " + "CreateStringList " + "CreateTreeListSelectDialog " + "CSelectSQL " + "CSQL " + "CSubString " + "CurrentUserID " + "CurrentUserName " + "CurrentVersion " + "DataSetLocateEx " + "DateDiff " + "DateTimeDiff " + "DateToStr " + "DayOfWeek " + "DeleteFile " + "DirectoryExists " + "DisableCheckAccessRights " + "DisableCheckFullShowingRestriction " + "DisableMassTaskSendingRestrictions " + "DropTable " + "DupeString " + "EditText " + "EnableCheckAccessRights " + "EnableCheckFullShowingRestriction " + "EnableMassTaskSendingRestrictions " + "EndOfMonth " + "EndOfPeriod " + "ExceptionExists " + "ExceptionsOff " + "ExceptionsOn " + "Execute " + "ExecuteProcess " + "Exit " + "ExpandEnvironmentVariables " + "ExtractFileDrive " + "ExtractFileExt " + "ExtractFileName " + "ExtractFilePath " + "ExtractParams " + "FileExists " + "FileSize " + "FindFile " + "FindSubString " + "FirmContext " + "ForceDirectories " + "Format " + "FormatDate " + "FormatNumeric " + "FormatSQLDate " + "FormatString " + "FreeException " + "GetComponent " + "GetComponentLaunchParam " + "GetConstant " + "GetLastException " + "GetReferenceRecord " + "GetRefTypeByRefID " + "GetTableID " + "GetTempFolder " + "IfThen " + "In " + "IndexOf " + "InputDialog " + "InputDialogEx " + "InteractiveMode " + "IsFileLocked " + "IsGraphicFile " + "IsNumeric " + "Length " + "LoadString " + "LoadStringFmt " + "LocalTimeToUTC " + "LowerCase " + "Max " + "MessageBox " + "MessageBoxEx " + "MimeDecodeBinary " + "MimeDecodeString " + "MimeEncodeBinary " + "MimeEncodeString " + "Min " + "MoneyInWords " + "MoveFile " + "NewID " + "Now " + "OpenFile " + "Ord " + "Precision " + "Raise " + "ReadCertificateFromFile " + "ReadFile " + "ReferenceCodeByID " + "ReferenceNumber " + "ReferenceRequisiteMode " + "ReferenceRequisiteValue " + "RegionDateSettings " + "RegionNumberSettings " + "RegionTimeSettings " + "RegRead " + "RegWrite " + "RenameFile " + "Replace " + "Round " + "SelectServerCode " + "SelectSQL " + "ServerDateTime " + "SetConstant " + "SetManagedFolderFieldsState " + "ShowConstantsInputDialog " + "ShowMessage " + "Sleep " + "Split " + "SQL " + "SQL2XLSTAB " + "SQLProfilingSendReport " + "StrToDate " + "SubString " + "SubStringCount " + "SystemSetting " + "Time " + "TimeDiff " + "Today " + "Transliterate " + "Trim " + "UpperCase " + "UserStatus " + "UTCToLocalTime " + "ValidateXML " + "VarIsClear " + "VarIsEmpty " + "VarIsNull " + "WorkTimeDiff " + "WriteFile " + "WriteFileEx " + "WriteObjectHistory " + "\u0410\u043D\u0430\u043B\u0438\u0437 " + "\u0411\u0430\u0437\u0430\u0414\u0430\u043D\u043D\u044B\u0445 " + "\u0411\u043B\u043E\u043A\u0415\u0441\u0442\u044C " + "\u0411\u043B\u043E\u043A\u0415\u0441\u0442\u044C\u0420\u0430\u0441\u0448 " + "\u0411\u043B\u043E\u043A\u0418\u043D\u0444\u043E " + "\u0411\u043B\u043E\u043A\u0421\u043D\u044F\u0442\u044C " + "\u0411\u043B\u043E\u043A\u0421\u043D\u044F\u0442\u044C\u0420\u0430\u0441\u0448 " + "\u0411\u043B\u043E\u043A\u0423\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C " + "\u0412\u0432\u043E\u0434 " + "\u0412\u0432\u043E\u0434\u041C\u0435\u043D\u044E " + "\u0412\u0435\u0434\u0421 " + "\u0412\u0435\u0434\u0421\u043F\u0440 " + "\u0412\u0435\u0440\u0445\u043D\u044F\u044F\u0413\u0440\u0430\u043D\u0438\u0446\u0430\u041C\u0430\u0441\u0441\u0438\u0432\u0430 " + "\u0412\u043D\u0435\u0448\u041F\u0440\u043E\u0433\u0440 " + "\u0412\u043E\u0441\u0441\u0442 " + "\u0412\u0440\u0435\u043C\u0435\u043D\u043D\u0430\u044F\u041F\u0430\u043F\u043A\u0430 " + "\u0412\u0440\u0435\u043C\u044F " + "\u0412\u044B\u0431\u043E\u0440SQL " + "\u0412\u044B\u0431\u0440\u0430\u0442\u044C\u0417\u0430\u043F\u0438\u0441\u044C " + "\u0412\u044B\u0434\u0435\u043B\u0438\u0442\u044C\u0421\u0442\u0440 " + "\u0412\u044B\u0437\u0432\u0430\u0442\u044C " + "\u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C " + "\u0412\u044B\u043F\u041F\u0440\u043E\u0433\u0440 " + "\u0413\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043A\u0438\u0439\u0424\u0430\u0439\u043B " + "\u0413\u0440\u0443\u043F\u043F\u0430\u0414\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E " + "\u0414\u0430\u0442\u0430\u0412\u0440\u0435\u043C\u044F\u0421\u0435\u0440\u0432 " + "\u0414\u0435\u043D\u044C\u041D\u0435\u0434\u0435\u043B\u0438 " + "\u0414\u0438\u0430\u043B\u043E\u0433\u0414\u0430\u041D\u0435\u0442 " + "\u0414\u043B\u0438\u043D\u0430\u0421\u0442\u0440 " + "\u0414\u043E\u0431\u041F\u043E\u0434\u0441\u0442\u0440 " + "\u0415\u041F\u0443\u0441\u0442\u043E " + "\u0415\u0441\u043B\u0438\u0422\u043E " + "\u0415\u0427\u0438\u0441\u043B\u043E " + "\u0417\u0430\u043C\u041F\u043E\u0434\u0441\u0442\u0440 " + "\u0417\u0430\u043F\u0438\u0441\u044C\u0421\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A\u0430 " + "\u0417\u043D\u0430\u0447\u041F\u043E\u043B\u044F\u0421\u043F\u0440 " + "\u0418\u0414\u0422\u0438\u043F\u0421\u043F\u0440 " + "\u0418\u0437\u0432\u043B\u0435\u0447\u044C\u0414\u0438\u0441\u043A " + "\u0418\u0437\u0432\u043B\u0435\u0447\u044C\u0418\u043C\u044F\u0424\u0430\u0439\u043B\u0430 " + "\u0418\u0437\u0432\u043B\u0435\u0447\u044C\u041F\u0443\u0442\u044C " + "\u0418\u0437\u0432\u043B\u0435\u0447\u044C\u0420\u0430\u0441\u0448\u0438\u0440\u0435\u043D\u0438\u0435 " + "\u0418\u0437\u043C\u0414\u0430\u0442 " + "\u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C\u0420\u0430\u0437\u043C\u0435\u0440\u041C\u0430\u0441\u0441\u0438\u0432\u0430 " + "\u0418\u0437\u043C\u0435\u0440\u0435\u043D\u0438\u0439\u041C\u0430\u0441\u0441\u0438\u0432\u0430 " + "\u0418\u043C\u044F\u041E\u0440\u0433 " + "\u0418\u043C\u044F\u041F\u043E\u043B\u044F\u0421\u043F\u0440 " + "\u0418\u043D\u0434\u0435\u043A\u0441 " + "\u0418\u043D\u0434\u0438\u043A\u0430\u0442\u043E\u0440\u0417\u0430\u043A\u0440\u044B\u0442\u044C " + "\u0418\u043D\u0434\u0438\u043A\u0430\u0442\u043E\u0440\u041E\u0442\u043A\u0440\u044B\u0442\u044C " + "\u0418\u043D\u0434\u0438\u043A\u0430\u0442\u043E\u0440\u0428\u0430\u0433 " + "\u0418\u043D\u0442\u0435\u0440\u0430\u043A\u0442\u0438\u0432\u043D\u044B\u0439\u0420\u0435\u0436\u0438\u043C " + "\u0418\u0442\u043E\u0433\u0422\u0431\u043B\u0421\u043F\u0440 " + "\u041A\u043E\u0434\u0412\u0438\u0434\u0412\u0435\u0434\u0421\u043F\u0440 " + "\u041A\u043E\u0434\u0412\u0438\u0434\u0421\u043F\u0440\u041F\u043E\u0418\u0414 " + "\u041A\u043E\u0434\u041F\u043EAnalit " + "\u041A\u043E\u0434\u0421\u0438\u043C\u0432\u043E\u043B\u0430 " + "\u041A\u043E\u0434\u0421\u043F\u0440 " + "\u041A\u043E\u043B\u041F\u043E\u0434\u0441\u0442\u0440 " + "\u041A\u043E\u043B\u041F\u0440\u043E\u043F " + "\u041A\u043E\u043D\u041C\u0435\u0441 " + "\u041A\u043E\u043D\u0441\u0442 " + "\u041A\u043E\u043D\u0441\u0442\u0415\u0441\u0442\u044C " + "\u041A\u043E\u043D\u0441\u0442\u0417\u043D\u0430\u0447 " + "\u041A\u043E\u043D\u0422\u0440\u0430\u043D " + "\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C\u0424\u0430\u0439\u043B " + "\u041A\u043E\u043F\u0438\u044F\u0421\u0442\u0440 " + "\u041A\u041F\u0435\u0440\u0438\u043E\u0434 " + "\u041A\u0421\u0442\u0440\u0422\u0431\u043B\u0421\u043F\u0440 " + "\u041C\u0430\u043A\u0441 " + "\u041C\u0430\u043A\u0441\u0421\u0442\u0440\u0422\u0431\u043B\u0421\u043F\u0440 " + "\u041C\u0430\u0441\u0441\u0438\u0432 " + "\u041C\u0435\u043D\u044E " + "\u041C\u0435\u043D\u044E\u0420\u0430\u0441\u0448 " + "\u041C\u0438\u043D " + "\u041D\u0430\u0431\u043E\u0440\u0414\u0430\u043D\u043D\u044B\u0445\u041D\u0430\u0439\u0442\u0438\u0420\u0430\u0441\u0448 " + "\u041D\u0430\u0438\u043C\u0412\u0438\u0434\u0421\u043F\u0440 " + "\u041D\u0430\u0438\u043C\u041F\u043EAnalit " + "\u041D\u0430\u0438\u043C\u0421\u043F\u0440 " + "\u041D\u0430\u0441\u0442\u0440\u043E\u0438\u0442\u044C\u041F\u0435\u0440\u0435\u0432\u043E\u0434\u044B\u0421\u0442\u0440\u043E\u043A " + "\u041D\u0430\u0447\u041C\u0435\u0441 " + "\u041D\u0430\u0447\u0422\u0440\u0430\u043D " + "\u041D\u0438\u0436\u043D\u044F\u044F\u0413\u0440\u0430\u043D\u0438\u0446\u0430\u041C\u0430\u0441\u0441\u0438\u0432\u0430 " + "\u041D\u043E\u043C\u0435\u0440\u0421\u043F\u0440 " + "\u041D\u041F\u0435\u0440\u0438\u043E\u0434 " + "\u041E\u043A\u043D\u043E " + "\u041E\u043A\u0440 " + "\u041E\u043A\u0440\u0443\u0436\u0435\u043D\u0438\u0435 " + "\u041E\u0442\u043B\u0418\u043D\u0444\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C " + "\u041E\u0442\u043B\u0418\u043D\u0444\u0423\u0434\u0430\u043B\u0438\u0442\u044C " + "\u041E\u0442\u0447\u0435\u0442 " + "\u041E\u0442\u0447\u0435\u0442\u0410\u043D\u0430\u043B " + "\u041E\u0442\u0447\u0435\u0442\u0418\u043D\u0442 " + "\u041F\u0430\u043F\u043A\u0430\u0421\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442 " + "\u041F\u0430\u0443\u0437\u0430 " + "\u041F\u0412\u044B\u0431\u043E\u0440SQL " + "\u041F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u0442\u044C\u0424\u0430\u0439\u043B " + "\u041F\u0435\u0440\u0435\u043C\u0435\u043D\u043D\u044B\u0435 " + "\u041F\u0435\u0440\u0435\u043C\u0435\u0441\u0442\u0438\u0442\u044C\u0424\u0430\u0439\u043B " + "\u041F\u043E\u0434\u0441\u0442\u0440 " + "\u041F\u043E\u0438\u0441\u043A\u041F\u043E\u0434\u0441\u0442\u0440 " + "\u041F\u043E\u0438\u0441\u043A\u0421\u0442\u0440 " + "\u041F\u043E\u043B\u0443\u0447\u0438\u0442\u044C\u0418\u0414\u0422\u0430\u0431\u043B\u0438\u0446\u044B " + "\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u0414\u043E\u043F\u043E\u043B\u043D\u0438\u0442\u0435\u043B\u044C\u043D\u043E " + "\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u0418\u0414 " + "\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u0418\u043C\u044F " + "\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u044C\u0421\u0442\u0430\u0442\u0443\u0441 " + "\u041F\u0440\u0435\u0440\u0432\u0430\u0442\u044C " + "\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C\u041F\u0430\u0440\u0430\u043C\u0435\u0442\u0440 " + "\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C\u041F\u0430\u0440\u0430\u043C\u0435\u0442\u0440\u0417\u043D\u0430\u0447 " + "\u041F\u0440\u043E\u0432\u0435\u0440\u0438\u0442\u044C\u0423\u0441\u043B\u043E\u0432\u0438\u0435 " + "\u0420\u0430\u0437\u0431\u0421\u0442\u0440 " + "\u0420\u0430\u0437\u043D\u0412\u0440\u0435\u043C\u044F " + "\u0420\u0430\u0437\u043D\u0414\u0430\u0442 " + "\u0420\u0430\u0437\u043D\u0414\u0430\u0442\u0430\u0412\u0440\u0435\u043C\u044F " + "\u0420\u0430\u0437\u043D\u0420\u0430\u0431\u0412\u0440\u0435\u043C\u044F " + "\u0420\u0435\u0433\u0423\u0441\u0442\u0412\u0440\u0435\u043C " + "\u0420\u0435\u0433\u0423\u0441\u0442\u0414\u0430\u0442 " + "\u0420\u0435\u0433\u0423\u0441\u0442\u0427\u0441\u043B " + "\u0420\u0435\u0434\u0422\u0435\u043A\u0441\u0442 " + "\u0420\u0435\u0435\u0441\u0442\u0440\u0417\u0430\u043F\u0438\u0441\u044C " + "\u0420\u0435\u0435\u0441\u0442\u0440\u0421\u043F\u0438\u0441\u043E\u043A\u0418\u043C\u0435\u043D\u041F\u0430\u0440\u0430\u043C " + "\u0420\u0435\u0435\u0441\u0442\u0440\u0427\u0442\u0435\u043D\u0438\u0435 " + "\u0420\u0435\u043A\u0432\u0421\u043F\u0440 " + "\u0420\u0435\u043A\u0432\u0421\u043F\u0440\u041F\u0440 " + "\u0421\u0435\u0433\u043E\u0434\u043D\u044F " + "\u0421\u0435\u0439\u0447\u0430\u0441 " + "\u0421\u0435\u0440\u0432\u0435\u0440 " + "\u0421\u0435\u0440\u0432\u0435\u0440\u041F\u0440\u043E\u0446\u0435\u0441\u0441\u0418\u0414 " + "\u0421\u0435\u0440\u0442\u0438\u0444\u0438\u043A\u0430\u0442\u0424\u0430\u0439\u043B\u0421\u0447\u0438\u0442\u0430\u0442\u044C " + "\u0421\u0436\u041F\u0440\u043E\u0431 " + "\u0421\u0438\u043C\u0432\u043E\u043B " + "\u0421\u0438\u0441\u0442\u0435\u043C\u0430\u0414\u0438\u0440\u0435\u043A\u0442\u0443\u043C\u041A\u043E\u0434 " + "\u0421\u0438\u0441\u0442\u0435\u043C\u0430\u0418\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u044F " + "\u0421\u0438\u0441\u0442\u0435\u043C\u0430\u041A\u043E\u0434 " + "\u0421\u043E\u0434\u0435\u0440\u0436\u0438\u0442 " + "\u0421\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u0417\u0430\u043A\u0440\u044B\u0442\u044C " + "\u0421\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u041E\u0442\u043A\u0440\u044B\u0442\u044C " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0414\u0438\u0430\u043B\u043E\u0433 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0414\u0438\u0430\u043B\u043E\u0433\u0412\u044B\u0431\u043E\u0440\u0430\u0418\u0437\u0414\u0432\u0443\u0445\u0421\u043F\u0438\u0441\u043A\u043E\u0432 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0414\u0438\u0430\u043B\u043E\u0433\u0412\u044B\u0431\u043E\u0440\u0430\u041F\u0430\u043F\u043A\u0438 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0414\u0438\u0430\u043B\u043E\u0433\u041E\u0442\u043A\u0440\u044B\u0442\u0438\u044F\u0424\u0430\u0439\u043B\u0430 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0414\u0438\u0430\u043B\u043E\u0433\u0421\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u0438\u044F\u0424\u0430\u0439\u043B\u0430 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0417\u0430\u043F\u0440\u043E\u0441 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0418\u043D\u0434\u0438\u043A\u0430\u0442\u043E\u0440 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0418\u0441\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u0435 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u041A\u044D\u0448\u0438\u0440\u043E\u0432\u0430\u043D\u043D\u044B\u0439\u0421\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u041C\u0430\u0441\u0441\u0438\u0432 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u041D\u0430\u0431\u043E\u0440\u0414\u0430\u043D\u043D\u044B\u0445 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u041E\u0431\u044A\u0435\u043A\u0442 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u041E\u0442\u0447\u0435\u0442 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u041F\u0430\u043F\u043A\u0443 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0420\u0435\u0434\u0430\u043A\u0442\u043E\u0440 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0421\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435 " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0421\u043F\u0438\u0441\u043E\u043A " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0421\u043F\u0438\u0441\u043E\u043A\u0421\u0442\u0440\u043E\u043A " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0421\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A " + "\u0421\u043E\u0437\u0434\u0430\u0442\u044C\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0439 " + "\u0421\u043E\u0437\u0434\u0421\u043F\u0440 " + "\u0421\u043E\u0441\u0442\u0421\u043F\u0440 " + "\u0421\u043E\u0445\u0440 " + "\u0421\u043E\u0445\u0440\u0421\u043F\u0440 " + "\u0421\u043F\u0438\u0441\u043E\u043A\u0421\u0438\u0441\u0442\u0435\u043C " + "\u0421\u043F\u0440 " + "\u0421\u043F\u0440\u0430\u0432\u043E\u0447\u043D\u0438\u043A " + "\u0421\u043F\u0440\u0411\u043B\u043E\u043A\u0415\u0441\u0442\u044C " + "\u0421\u043F\u0440\u0411\u043B\u043E\u043A\u0421\u043D\u044F\u0442\u044C " + "\u0421\u043F\u0440\u0411\u043B\u043E\u043A\u0421\u043D\u044F\u0442\u044C\u0420\u0430\u0441\u0448 " + "\u0421\u043F\u0440\u0411\u043B\u043E\u043A\u0423\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C " + "\u0421\u043F\u0440\u0418\u0437\u043C\u041D\u0430\u0431\u0414\u0430\u043D " + "\u0421\u043F\u0440\u041A\u043E\u0434 " + "\u0421\u043F\u0440\u041D\u043E\u043C\u0435\u0440 " + "\u0421\u043F\u0440\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C " + "\u0421\u043F\u0440\u041E\u0442\u043A\u0440\u044B\u0442\u044C " + "\u0421\u043F\u0440\u041E\u0442\u043C\u0435\u043D\u0438\u0442\u044C " + "\u0421\u043F\u0440\u041F\u0430\u0440\u0430\u043C " + "\u0421\u043F\u0440\u041F\u043E\u043B\u0435\u0417\u043D\u0430\u0447 " + "\u0421\u043F\u0440\u041F\u043E\u043B\u0435\u0418\u043C\u044F " + "\u0421\u043F\u0440\u0420\u0435\u043A\u0432 " + "\u0421\u043F\u0440\u0420\u0435\u043A\u0432\u0412\u0432\u0435\u0434\u0417\u043D " + "\u0421\u043F\u0440\u0420\u0435\u043A\u0432\u041D\u043E\u0432\u044B\u0435 " + "\u0421\u043F\u0440\u0420\u0435\u043A\u0432\u041F\u0440 " + "\u0421\u043F\u0440\u0420\u0435\u043A\u0432\u041F\u0440\u0435\u0434\u0417\u043D " + "\u0421\u043F\u0440\u0420\u0435\u043A\u0432\u0420\u0435\u0436\u0438\u043C " + "\u0421\u043F\u0440\u0420\u0435\u043A\u0432\u0422\u0438\u043F\u0422\u0435\u043A\u0441\u0442 " + "\u0421\u043F\u0440\u0421\u043E\u0437\u0434\u0430\u0442\u044C " + "\u0421\u043F\u0440\u0421\u043E\u0441\u0442 " + "\u0421\u043F\u0440\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C " + "\u0421\u043F\u0440\u0422\u0431\u043B\u0418\u0442\u043E\u0433 " + "\u0421\u043F\u0440\u0422\u0431\u043B\u0421\u0442\u0440 " + "\u0421\u043F\u0440\u0422\u0431\u043B\u0421\u0442\u0440\u041A\u043E\u043B " + "\u0421\u043F\u0440\u0422\u0431\u043B\u0421\u0442\u0440\u041C\u0430\u043A\u0441 " + "\u0421\u043F\u0440\u0422\u0431\u043B\u0421\u0442\u0440\u041C\u0438\u043D " + "\u0421\u043F\u0440\u0422\u0431\u043B\u0421\u0442\u0440\u041F\u0440\u0435\u0434 " + "\u0421\u043F\u0440\u0422\u0431\u043B\u0421\u0442\u0440\u0421\u043B\u0435\u0434 " + "\u0421\u043F\u0440\u0422\u0431\u043B\u0421\u0442\u0440\u0421\u043E\u0437\u0434 " + "\u0421\u043F\u0440\u0422\u0431\u043B\u0421\u0442\u0440\u0423\u0434 " + "\u0421\u043F\u0440\u0422\u0435\u043A\u041F\u0440\u0435\u0434\u0441\u0442 " + "\u0421\u043F\u0440\u0423\u0434\u0430\u043B\u0438\u0442\u044C " + "\u0421\u0440\u0430\u0432\u043D\u0438\u0442\u044C\u0421\u0442\u0440 " + "\u0421\u0442\u0440\u0412\u0435\u0440\u0445\u0420\u0435\u0433\u0438\u0441\u0442\u0440 " + "\u0421\u0442\u0440\u041D\u0438\u0436\u043D\u0420\u0435\u0433\u0438\u0441\u0442\u0440 " + "\u0421\u0442\u0440\u0422\u0431\u043B\u0421\u043F\u0440 " + "\u0421\u0443\u043C\u041F\u0440\u043E\u043F " + "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0439 " + "\u0421\u0446\u0435\u043D\u0430\u0440\u0438\u0439\u041F\u0430\u0440\u0430\u043C " + "\u0422\u0435\u043A\u0412\u0435\u0440\u0441\u0438\u044F " + "\u0422\u0435\u043A\u041E\u0440\u0433 " + "\u0422\u043E\u0447\u043D " + "\u0422\u0440\u0430\u043D " + "\u0422\u0440\u0430\u043D\u0441\u043B\u0438\u0442\u0435\u0440\u0430\u0446\u0438\u044F " + "\u0423\u0434\u0430\u043B\u0438\u0442\u044C\u0422\u0430\u0431\u043B\u0438\u0446\u0443 " + "\u0423\u0434\u0430\u043B\u0438\u0442\u044C\u0424\u0430\u0439\u043B " + "\u0423\u0434\u0421\u043F\u0440 " + "\u0423\u0434\u0421\u0442\u0440\u0422\u0431\u043B\u0421\u043F\u0440 " + "\u0423\u0441\u0442 " + "\u0423\u0441\u0442\u0430\u043D\u043E\u0432\u043A\u0438\u041A\u043E\u043D\u0441\u0442\u0430\u043D\u0442 " + "\u0424\u0430\u0439\u043B\u0410\u0442\u0440\u0438\u0431\u0443\u0442\u0421\u0447\u0438\u0442\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u0410\u0442\u0440\u0438\u0431\u0443\u0442\u0423\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C " + "\u0424\u0430\u0439\u043B\u0412\u0440\u0435\u043C\u044F " + "\u0424\u0430\u0439\u043B\u0412\u0440\u0435\u043C\u044F\u0423\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C " + "\u0424\u0430\u0439\u043B\u0412\u044B\u0431\u0440\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u0417\u0430\u043D\u044F\u0442 " + "\u0424\u0430\u0439\u043B\u0417\u0430\u043F\u0438\u0441\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u0418\u0441\u043A\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u041C\u043E\u0436\u043D\u043E\u0427\u0438\u0442\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u041E\u0442\u043A\u0440\u044B\u0442\u044C " + "\u0424\u0430\u0439\u043B\u041F\u0435\u0440\u0435\u0438\u043C\u0435\u043D\u043E\u0432\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u041F\u0435\u0440\u0435\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u041F\u0435\u0440\u0435\u043C\u0435\u0441\u0442\u0438\u0442\u044C " + "\u0424\u0430\u0439\u043B\u041F\u0440\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C " + "\u0424\u0430\u0439\u043B\u0420\u0430\u0437\u043C\u0435\u0440 " + "\u0424\u0430\u0439\u043B\u0421\u043E\u0437\u0434\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u0421\u0441\u044B\u043B\u043A\u0430\u0421\u043E\u0437\u0434\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u0421\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442 " + "\u0424\u0430\u0439\u043B\u0421\u0447\u0438\u0442\u0430\u0442\u044C " + "\u0424\u0430\u0439\u043B\u0423\u0434\u0430\u043B\u0438\u0442\u044C " + "\u0424\u043C\u0442SQL\u0414\u0430\u0442 " + "\u0424\u043C\u0442\u0414\u0430\u0442 " + "\u0424\u043C\u0442\u0421\u0442\u0440 " + "\u0424\u043C\u0442\u0427\u0441\u043B " + "\u0424\u043E\u0440\u043C\u0430\u0442 " + "\u0426\u041C\u0430\u0441\u0441\u0438\u0432\u042D\u043B\u0435\u043C\u0435\u043D\u0442 " + "\u0426\u041D\u0430\u0431\u043E\u0440\u0414\u0430\u043D\u043D\u044B\u0445\u0420\u0435\u043A\u0432\u0438\u0437\u0438\u0442 " + "\u0426\u041F\u043E\u0434\u0441\u0442\u0440 ";
-    const predefined_variables = "AltState " + "Application " + "CallType " + "ComponentTokens " + "CreatedJobs " + "CreatedNotices " + "ControlState " + "DialogResult " + "Dialogs " + "EDocuments " + "EDocumentVersionSource " + "Folders " + "GlobalIDs " + "Job " + "Jobs " + "InputValue " + "LookUpReference " + "LookUpRequisiteNames " + "LookUpSearch " + "Object " + "ParentComponent " + "Processes " + "References " + "Requisite " + "ReportName " + "Reports " + "Result " + "Scripts " + "Searches " + "SelectedAttachments " + "SelectedItems " + "SelectMode " + "Sender " + "ServerEvents " + "ServiceFactory " + "ShiftState " + "SubTask " + "SystemDialogs " + "Tasks " + "Wizard " + "Wizards " + "Work " + "\u0412\u044B\u0437\u043E\u0432\u0421\u043F\u043E\u0441\u043E\u0431 " + "\u0418\u043C\u044F\u041E\u0442\u0447\u0435\u0442\u0430 " + "\u0420\u0435\u043A\u0432\u0417\u043D\u0430\u0447 ";
+    const system_functions = "AddSubString " + "AdjustLineBreaks " + "AmountInWords " + "Analysis " + "ArrayDimCount " + "ArrayHighBound " + "ArrayLowBound " + "ArrayOf " + "ArrayReDim " + "Assert " + "Assigned " + "BeginOfMonth " + "BeginOfPeriod " + "BuildProfilingOperationAnalysis " + "CallProcedure " + "CanReadFile " + "CArrayElement " + "CDataSetRequisite " + "ChangeDate " + "ChangeReferenceDataset " + "Char " + "CharPos " + "CheckParam " + "CheckParamValue " + "CompareStrings " + "ConstantExists " + "ControlState " + "ConvertDateStr " + "Copy " + "CopyFile " + "CreateArray " + "CreateCachedReference " + "CreateConnection " + "CreateDialog " + "CreateDualListDialog " + "CreateEditor " + "CreateException " + "CreateFile " + "CreateFolderDialog " + "CreateInputDialog " + "CreateLinkFile " + "CreateList " + "CreateLock " + "CreateMemoryDataSet " + "CreateObject " + "CreateOpenDialog " + "CreateProgress " + "CreateQuery " + "CreateReference " + "CreateReport " + "CreateSaveDialog " + "CreateScript " + "CreateSQLPivotFunction " + "CreateStringList " + "CreateTreeListSelectDialog " + "CSelectSQL " + "CSQL " + "CSubString " + "CurrentUserID " + "CurrentUserName " + "CurrentVersion " + "DataSetLocateEx " + "DateDiff " + "DateTimeDiff " + "DateToStr " + "DayOfWeek " + "DeleteFile " + "DirectoryExists " + "DisableCheckAccessRights " + "DisableCheckFullShowingRestriction " + "DisableMassTaskSendingRestrictions " + "DropTable " + "DupeString " + "EditText " + "EnableCheckAccessRights " + "EnableCheckFullShowingRestriction " + "EnableMassTaskSendingRestrictions " + "EndOfMonth " + "EndOfPeriod " + "ExceptionExists " + "ExceptionsOff " + "ExceptionsOn " + "Execute " + "ExecuteProcess " + "Exit " + "ExpandEnvironmentVariables " + "ExtractFileDrive " + "ExtractFileExt " + "ExtractFileName " + "ExtractFilePath " + "ExtractParams " + "FileExists " + "FileSize " + "FindFile " + "FindSubString " + "FirmContext " + "ForceDirectories " + "Format " + "FormatDate " + "FormatNumeric " + "FormatSQLDate " + "FormatString " + "FreeException " + "GetComponent " + "GetComponentLaunchParam " + "GetConstant " + "GetLastException " + "GetReferenceRecord " + "GetRefTypeByRefID " + "GetTableID " + "GetTempFolder " + "IfThen " + "In " + "IndexOf " + "InputDialog " + "InputDialogEx " + "InteractiveMode " + "IsFileLocked " + "IsGraphicFile " + "IsNumeric " + "Length " + "LoadString " + "LoadStringFmt " + "LocalTimeToUTC " + "LowerCase " + "Max " + "MessageBox " + "MessageBoxEx " + "MimeDecodeBinary " + "MimeDecodeString " + "MimeEncodeBinary " + "MimeEncodeString " + "Min " + "MoneyInWords " + "MoveFile " + "NewID " + "Now " + "OpenFile " + "Ord " + "Precision " + "Raise " + "ReadCertificateFromFile " + "ReadFile " + "ReferenceCodeByID " + "ReferenceNumber " + "ReferenceRequisiteMode " + "ReferenceRequisiteValue " + "RegionDateSettings " + "RegionNumberSettings " + "RegionTimeSettings " + "RegRead " + "RegWrite " + "RenameFile " + "Replace " + "Round " + "SelectServerCode " + "SelectSQL " + "ServerDateTime " + "SetConstant " + "SetManagedFolderFieldsState " + "ShowConstantsInputDialog " + "ShowMessage " + "Sleep " + "Split " + "SQL " + "SQL2XLSTAB " + "SQLProfilingSendReport " + "StrToDate " + "SubString " + "SubStringCount " + "SystemSetting " + "Time " + "TimeDiff " + "Today " + "Transliterate " + "Trim " + "UpperCase " + "UserStatus " + "UTCToLocalTime " + "ValidateXML " + "VarIsClear " + "VarIsEmpty " + "VarIsNull " + "WorkTimeDiff " + "WriteFile " + "WriteFileEx " + "WriteObjectHistory " + "Анализ " + "БазаДанных " + "БлокЕсть " + "БлокЕстьРасш " + "БлокИнфо " + "БлокСнять " + "БлокСнятьРасш " + "БлокУстановить " + "Ввод " + "ВводМеню " + "ВедС " + "ВедСпр " + "ВерхняяГраницаМассива " + "ВнешПрогр " + "Восст " + "ВременнаяПапка " + "Время " + "ВыборSQL " + "ВыбратьЗапись " + "ВыделитьСтр " + "Вызвать " + "Выполнить " + "ВыпПрогр " + "ГрафическийФайл " + "ГруппаДополнительно " + "ДатаВремяСерв " + "ДеньНедели " + "ДиалогДаНет " + "ДлинаСтр " + "ДобПодстр " + "ЕПусто " + "ЕслиТо " + "ЕЧисло " + "ЗамПодстр " + "ЗаписьСправочника " + "ЗначПоляСпр " + "ИДТипСпр " + "ИзвлечьДиск " + "ИзвлечьИмяФайла " + "ИзвлечьПуть " + "ИзвлечьРасширение " + "ИзмДат " + "ИзменитьРазмерМассива " + "ИзмеренийМассива " + "ИмяОрг " + "ИмяПоляСпр " + "Индекс " + "ИндикаторЗакрыть " + "ИндикаторОткрыть " + "ИндикаторШаг " + "ИнтерактивныйРежим " + "ИтогТблСпр " + "КодВидВедСпр " + "КодВидСпрПоИД " + "КодПоAnalit " + "КодСимвола " + "КодСпр " + "КолПодстр " + "КолПроп " + "КонМес " + "Конст " + "КонстЕсть " + "КонстЗнач " + "КонТран " + "КопироватьФайл " + "КопияСтр " + "КПериод " + "КСтрТблСпр " + "Макс " + "МаксСтрТблСпр " + "Массив " + "Меню " + "МенюРасш " + "Мин " + "НаборДанныхНайтиРасш " + "НаимВидСпр " + "НаимПоAnalit " + "НаимСпр " + "НастроитьПереводыСтрок " + "НачМес " + "НачТран " + "НижняяГраницаМассива " + "НомерСпр " + "НПериод " + "Окно " + "Окр " + "Окружение " + "ОтлИнфДобавить " + "ОтлИнфУдалить " + "Отчет " + "ОтчетАнал " + "ОтчетИнт " + "ПапкаСуществует " + "Пауза " + "ПВыборSQL " + "ПереименоватьФайл " + "Переменные " + "ПереместитьФайл " + "Подстр " + "ПоискПодстр " + "ПоискСтр " + "ПолучитьИДТаблицы " + "ПользовательДополнительно " + "ПользовательИД " + "ПользовательИмя " + "ПользовательСтатус " + "Прервать " + "ПроверитьПараметр " + "ПроверитьПараметрЗнач " + "ПроверитьУсловие " + "РазбСтр " + "РазнВремя " + "РазнДат " + "РазнДатаВремя " + "РазнРабВремя " + "РегУстВрем " + "РегУстДат " + "РегУстЧсл " + "РедТекст " + "РеестрЗапись " + "РеестрСписокИменПарам " + "РеестрЧтение " + "РеквСпр " + "РеквСпрПр " + "Сегодня " + "Сейчас " + "Сервер " + "СерверПроцессИД " + "СертификатФайлСчитать " + "СжПроб " + "Символ " + "СистемаДиректумКод " + "СистемаИнформация " + "СистемаКод " + "Содержит " + "СоединениеЗакрыть " + "СоединениеОткрыть " + "СоздатьДиалог " + "СоздатьДиалогВыбораИзДвухСписков " + "СоздатьДиалогВыбораПапки " + "СоздатьДиалогОткрытияФайла " + "СоздатьДиалогСохраненияФайла " + "СоздатьЗапрос " + "СоздатьИндикатор " + "СоздатьИсключение " + "СоздатьКэшированныйСправочник " + "СоздатьМассив " + "СоздатьНаборДанных " + "СоздатьОбъект " + "СоздатьОтчет " + "СоздатьПапку " + "СоздатьРедактор " + "СоздатьСоединение " + "СоздатьСписок " + "СоздатьСписокСтрок " + "СоздатьСправочник " + "СоздатьСценарий " + "СоздСпр " + "СостСпр " + "Сохр " + "СохрСпр " + "СписокСистем " + "Спр " + "Справочник " + "СпрБлокЕсть " + "СпрБлокСнять " + "СпрБлокСнятьРасш " + "СпрБлокУстановить " + "СпрИзмНабДан " + "СпрКод " + "СпрНомер " + "СпрОбновить " + "СпрОткрыть " + "СпрОтменить " + "СпрПарам " + "СпрПолеЗнач " + "СпрПолеИмя " + "СпрРекв " + "СпрРеквВведЗн " + "СпрРеквНовые " + "СпрРеквПр " + "СпрРеквПредЗн " + "СпрРеквРежим " + "СпрРеквТипТекст " + "СпрСоздать " + "СпрСост " + "СпрСохранить " + "СпрТблИтог " + "СпрТблСтр " + "СпрТблСтрКол " + "СпрТблСтрМакс " + "СпрТблСтрМин " + "СпрТблСтрПред " + "СпрТблСтрСлед " + "СпрТблСтрСозд " + "СпрТблСтрУд " + "СпрТекПредст " + "СпрУдалить " + "СравнитьСтр " + "СтрВерхРегистр " + "СтрНижнРегистр " + "СтрТблСпр " + "СумПроп " + "Сценарий " + "СценарийПарам " + "ТекВерсия " + "ТекОрг " + "Точн " + "Тран " + "Транслитерация " + "УдалитьТаблицу " + "УдалитьФайл " + "УдСпр " + "УдСтрТблСпр " + "Уст " + "УстановкиКонстант " + "ФайлАтрибутСчитать " + "ФайлАтрибутУстановить " + "ФайлВремя " + "ФайлВремяУстановить " + "ФайлВыбрать " + "ФайлЗанят " + "ФайлЗаписать " + "ФайлИскать " + "ФайлКопировать " + "ФайлМожноЧитать " + "ФайлОткрыть " + "ФайлПереименовать " + "ФайлПерекодировать " + "ФайлПереместить " + "ФайлПросмотреть " + "ФайлРазмер " + "ФайлСоздать " + "ФайлСсылкаСоздать " + "ФайлСуществует " + "ФайлСчитать " + "ФайлУдалить " + "ФмтSQLДат " + "ФмтДат " + "ФмтСтр " + "ФмтЧсл " + "Формат " + "ЦМассивЭлемент " + "ЦНаборДанныхРеквизит " + "ЦПодстр ";
+    const predefined_variables = "AltState " + "Application " + "CallType " + "ComponentTokens " + "CreatedJobs " + "CreatedNotices " + "ControlState " + "DialogResult " + "Dialogs " + "EDocuments " + "EDocumentVersionSource " + "Folders " + "GlobalIDs " + "Job " + "Jobs " + "InputValue " + "LookUpReference " + "LookUpRequisiteNames " + "LookUpSearch " + "Object " + "ParentComponent " + "Processes " + "References " + "Requisite " + "ReportName " + "Reports " + "Result " + "Scripts " + "Searches " + "SelectedAttachments " + "SelectedItems " + "SelectMode " + "Sender " + "ServerEvents " + "ServiceFactory " + "ShiftState " + "SubTask " + "SystemDialogs " + "Tasks " + "Wizard " + "Wizards " + "Work " + "ВызовСпособ " + "ИмяОтчета " + "РеквЗнач ";
     const interfaces = "IApplication " + "IAccessRights " + "IAccountRepository " + "IAccountSelectionRestrictions " + "IAction " + "IActionList " + "IAdministrationHistoryDescription " + "IAnchors " + "IApplication " + "IArchiveInfo " + "IAttachment " + "IAttachmentList " + "ICheckListBox " + "ICheckPointedList " + "IColumn " + "IComponent " + "IComponentDescription " + "IComponentToken " + "IComponentTokenFactory " + "IComponentTokenInfo " + "ICompRecordInfo " + "IConnection " + "IContents " + "IControl " + "IControlJob " + "IControlJobInfo " + "IControlList " + "ICrypto " + "ICrypto2 " + "ICustomJob " + "ICustomJobInfo " + "ICustomListBox " + "ICustomObjectWizardStep " + "ICustomWork " + "ICustomWorkInfo " + "IDataSet " + "IDataSetAccessInfo " + "IDataSigner " + "IDateCriterion " + "IDateRequisite " + "IDateRequisiteDescription " + "IDateValue " + "IDeaAccessRights " + "IDeaObjectInfo " + "IDevelopmentComponentLock " + "IDialog " + "IDialogFactory " + "IDialogPickRequisiteItems " + "IDialogsFactory " + "IDICSFactory " + "IDocRequisite " + "IDocumentInfo " + "IDualListDialog " + "IECertificate " + "IECertificateInfo " + "IECertificates " + "IEditControl " + "IEditorForm " + "IEdmsExplorer " + "IEdmsObject " + "IEdmsObjectDescription " + "IEdmsObjectFactory " + "IEdmsObjectInfo " + "IEDocument " + "IEDocumentAccessRights " + "IEDocumentDescription " + "IEDocumentEditor " + "IEDocumentFactory " + "IEDocumentInfo " + "IEDocumentStorage " + "IEDocumentVersion " + "IEDocumentVersionListDialog " + "IEDocumentVersionSource " + "IEDocumentWizardStep " + "IEDocVerSignature " + "IEDocVersionState " + "IEnabledMode " + "IEncodeProvider " + "IEncrypter " + "IEvent " + "IEventList " + "IException " + "IExternalEvents " + "IExternalHandler " + "IFactory " + "IField " + "IFileDialog " + "IFolder " + "IFolderDescription " + "IFolderDialog " + "IFolderFactory " + "IFolderInfo " + "IForEach " + "IForm " + "IFormTitle " + "IFormWizardStep " + "IGlobalIDFactory " + "IGlobalIDInfo " + "IGrid " + "IHasher " + "IHistoryDescription " + "IHyperLinkControl " + "IImageButton " + "IImageControl " + "IInnerPanel " + "IInplaceHint " + "IIntegerCriterion " + "IIntegerList " + "IIntegerRequisite " + "IIntegerValue " + "IISBLEditorForm " + "IJob " + "IJobDescription " + "IJobFactory " + "IJobForm " + "IJobInfo " + "ILabelControl " + "ILargeIntegerCriterion " + "ILargeIntegerRequisite " + "ILargeIntegerValue " + "ILicenseInfo " + "ILifeCycleStage " + "IList " + "IListBox " + "ILocalIDInfo " + "ILocalization " + "ILock " + "IMemoryDataSet " + "IMessagingFactory " + "IMetadataRepository " + "INotice " + "INoticeInfo " + "INumericCriterion " + "INumericRequisite " + "INumericValue " + "IObject " + "IObjectDescription " + "IObjectImporter " + "IObjectInfo " + "IObserver " + "IPanelGroup " + "IPickCriterion " + "IPickProperty " + "IPickRequisite " + "IPickRequisiteDescription " + "IPickRequisiteItem " + "IPickRequisiteItems " + "IPickValue " + "IPrivilege " + "IPrivilegeList " + "IProcess " + "IProcessFactory " + "IProcessMessage " + "IProgress " + "IProperty " + "IPropertyChangeEvent " + "IQuery " + "IReference " + "IReferenceCriterion " + "IReferenceEnabledMode " + "IReferenceFactory " + "IReferenceHistoryDescription " + "IReferenceInfo " + "IReferenceRecordCardWizardStep " + "IReferenceRequisiteDescription " + "IReferencesFactory " + "IReferenceValue " + "IRefRequisite " + "IReport " + "IReportFactory " + "IRequisite " + "IRequisiteDescription " + "IRequisiteDescriptionList " + "IRequisiteFactory " + "IRichEdit " + "IRouteStep " + "IRule " + "IRuleList " + "ISchemeBlock " + "IScript " + "IScriptFactory " + "ISearchCriteria " + "ISearchCriterion " + "ISearchDescription " + "ISearchFactory " + "ISearchFolderInfo " + "ISearchForObjectDescription " + "ISearchResultRestrictions " + "ISecuredContext " + "ISelectDialog " + "IServerEvent " + "IServerEventFactory " + "IServiceDialog " + "IServiceFactory " + "ISignature " + "ISignProvider " + "ISignProvider2 " + "ISignProvider3 " + "ISimpleCriterion " + "IStringCriterion " + "IStringList " + "IStringRequisite " + "IStringRequisiteDescription " + "IStringValue " + "ISystemDialogsFactory " + "ISystemInfo " + "ITabSheet " + "ITask " + "ITaskAbortReasonInfo " + "ITaskCardWizardStep " + "ITaskDescription " + "ITaskFactory " + "ITaskInfo " + "ITaskRoute " + "ITextCriterion " + "ITextRequisite " + "ITextValue " + "ITreeListSelectDialog " + "IUser " + "IUserList " + "IValue " + "IView " + "IWebBrowserControl " + "IWizard " + "IWizardAction " + "IWizardFactory " + "IWizardFormElement " + "IWizardParam " + "IWizardPickParam " + "IWizardReferenceParam " + "IWizardStep " + "IWorkAccessRights " + "IWorkDescription " + "IWorkflowAskableParam " + "IWorkflowAskableParams " + "IWorkflowBlock " + "IWorkflowBlockResult " + "IWorkflowEnabledMode " + "IWorkflowParam " + "IWorkflowPickParam " + "IWorkflowReferenceParam " + "IWorkState " + "IWorkTreeCustomNode " + "IWorkTreeJobNode " + "IWorkTreeTaskNode " + "IXMLEditorForm " + "SBCrypto ";
     const BUILTIN = CONSTANTS + ENUMS;
     const CLASS = predefined_variables;
@@ -19175,6 +19459,24 @@ var require_isbl = __commonJS((exports, module) => {
 
 // node_modules/highlight.js/lib/languages/java.js
 var require_java = __commonJS((exports, module) => {
+  var decimalDigits = "[0-9](_*[0-9])*";
+  var frac = `\\.(${decimalDigits})`;
+  var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
+  var NUMERIC = {
+    className: "number",
+    variants: [
+      { begin: `(\\b(${decimalDigits})((${frac})|\\.)?|(${frac}))` + `[eE][+-]?(${decimalDigits})[fFdD]?\\b` },
+      { begin: `\\b(${decimalDigits})((${frac})[fFdD]?\\b|\\.([fFdD]\\b)?)` },
+      { begin: `(${frac})[fFdD]?\\b` },
+      { begin: `\\b(${decimalDigits})[fFdD]\\b` },
+      { begin: `\\b0[xX]((${hexDigits})\\.?|(${hexDigits})?\\.(${hexDigits}))` + `[pP][+-]?(${decimalDigits})[fFdD]?\\b` },
+      { begin: "\\b(0|[1-9](_*[0-9])*)[lL]?\\b" },
+      { begin: `\\b0[xX](${hexDigits})[lL]?\\b` },
+      { begin: "\\b0(_*[0-7])*[lL]?\\b" },
+      { begin: "\\b0[bB][01](_*[01])*[lL]?\\b" }
+    ],
+    relevance: 0
+  };
   function recurRegex(re, substitution, depth) {
     if (depth === -1)
       return "";
@@ -19184,7 +19486,7 @@ var require_java = __commonJS((exports, module) => {
   }
   function java(hljs) {
     const regex = hljs.regex;
-    const JAVA_IDENT_RE = "[\xC0-\u02B8a-zA-Z_$][\xC0-\u02B8a-zA-Z_$0-9]*";
+    const JAVA_IDENT_RE = "[À-ʸa-zA-Z_$][À-ʸa-zA-Z_$0-9]*";
     const GENERIC_IDENT_RE = JAVA_IDENT_RE + recurRegex("(?:<" + JAVA_IDENT_RE + "~~~(?:\\s*,\\s*" + JAVA_IDENT_RE + "~~~)*>)?", /~~~/g, 2);
     const MAIN_KEYWORDS = [
       "synchronized",
@@ -19229,7 +19531,8 @@ var require_java = __commonJS((exports, module) => {
       "sealed",
       "yield",
       "permits",
-      "goto"
+      "goto",
+      "when"
     ];
     const BUILT_INS = [
       "super",
@@ -19391,29 +19694,144 @@ var require_java = __commonJS((exports, module) => {
       ]
     };
   }
-  var decimalDigits = "[0-9](_*[0-9])*";
-  var frac = `\\.(${decimalDigits})`;
-  var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
-  var NUMERIC = {
-    className: "number",
-    variants: [
-      { begin: `(\\b(${decimalDigits})((${frac})|\\.)?|(${frac}))` + `[eE][+-]?(${decimalDigits})[fFdD]?\\b` },
-      { begin: `\\b(${decimalDigits})((${frac})[fFdD]?\\b|\\.([fFdD]\\b)?)` },
-      { begin: `(${frac})[fFdD]?\\b` },
-      { begin: `\\b(${decimalDigits})[fFdD]\\b` },
-      { begin: `\\b0[xX]((${hexDigits})\\.?|(${hexDigits})?\\.(${hexDigits}))` + `[pP][+-]?(${decimalDigits})[fFdD]?\\b` },
-      { begin: "\\b(0|[1-9](_*[0-9])*)[lL]?\\b" },
-      { begin: `\\b0[xX](${hexDigits})[lL]?\\b` },
-      { begin: "\\b0(_*[0-7])*[lL]?\\b" },
-      { begin: "\\b0[bB][01](_*[01])*[lL]?\\b" }
-    ],
-    relevance: 0
-  };
   module.exports = java;
 });
 
 // node_modules/highlight.js/lib/languages/javascript.js
 var require_javascript = __commonJS((exports, module) => {
+  var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
+  var KEYWORDS = [
+    "as",
+    "in",
+    "of",
+    "if",
+    "for",
+    "while",
+    "finally",
+    "var",
+    "new",
+    "function",
+    "do",
+    "return",
+    "void",
+    "else",
+    "break",
+    "catch",
+    "instanceof",
+    "with",
+    "throw",
+    "case",
+    "default",
+    "try",
+    "switch",
+    "continue",
+    "typeof",
+    "delete",
+    "let",
+    "yield",
+    "const",
+    "class",
+    "debugger",
+    "async",
+    "await",
+    "static",
+    "import",
+    "from",
+    "export",
+    "extends",
+    "using"
+  ];
+  var LITERALS = [
+    "true",
+    "false",
+    "null",
+    "undefined",
+    "NaN",
+    "Infinity"
+  ];
+  var TYPES = [
+    "Object",
+    "Function",
+    "Boolean",
+    "Symbol",
+    "Math",
+    "Date",
+    "Number",
+    "BigInt",
+    "String",
+    "RegExp",
+    "Array",
+    "Float32Array",
+    "Float64Array",
+    "Int8Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int16Array",
+    "Int32Array",
+    "Uint16Array",
+    "Uint32Array",
+    "BigInt64Array",
+    "BigUint64Array",
+    "Set",
+    "Map",
+    "WeakSet",
+    "WeakMap",
+    "ArrayBuffer",
+    "SharedArrayBuffer",
+    "Atomics",
+    "DataView",
+    "JSON",
+    "Promise",
+    "Generator",
+    "GeneratorFunction",
+    "AsyncFunction",
+    "Reflect",
+    "Proxy",
+    "Intl",
+    "WebAssembly"
+  ];
+  var ERROR_TYPES = [
+    "Error",
+    "EvalError",
+    "InternalError",
+    "RangeError",
+    "ReferenceError",
+    "SyntaxError",
+    "TypeError",
+    "URIError"
+  ];
+  var BUILT_IN_GLOBALS = [
+    "setInterval",
+    "setTimeout",
+    "clearInterval",
+    "clearTimeout",
+    "require",
+    "exports",
+    "eval",
+    "isFinite",
+    "isNaN",
+    "parseFloat",
+    "parseInt",
+    "decodeURI",
+    "decodeURIComponent",
+    "encodeURI",
+    "encodeURIComponent",
+    "escape",
+    "unescape"
+  ];
+  var BUILT_IN_VARIABLES = [
+    "arguments",
+    "this",
+    "super",
+    "console",
+    "window",
+    "document",
+    "localStorage",
+    "sessionStorage",
+    "module",
+    "global"
+  ];
+  var BUILT_INS = [].concat(BUILT_IN_GLOBALS, TYPES, ERROR_TYPES);
   function javascript(hljs) {
     const regex = hljs.regex;
     const hasClosingTag = (match, { after }) => {
@@ -19772,8 +20190,8 @@ var require_javascript = __commonJS((exports, module) => {
         NUMBER,
         CLASS_REFERENCE,
         {
-          className: "attr",
-          begin: IDENT_RE$1 + regex.lookahead(":"),
+          scope: "attr",
+          match: IDENT_RE$1 + regex.lookahead(":"),
           relevance: 0
         },
         FUNCTION_VARIABLE,
@@ -19881,138 +20299,6 @@ var require_javascript = __commonJS((exports, module) => {
       ]
     };
   }
-  var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
-  var KEYWORDS = [
-    "as",
-    "in",
-    "of",
-    "if",
-    "for",
-    "while",
-    "finally",
-    "var",
-    "new",
-    "function",
-    "do",
-    "return",
-    "void",
-    "else",
-    "break",
-    "catch",
-    "instanceof",
-    "with",
-    "throw",
-    "case",
-    "default",
-    "try",
-    "switch",
-    "continue",
-    "typeof",
-    "delete",
-    "let",
-    "yield",
-    "const",
-    "class",
-    "debugger",
-    "async",
-    "await",
-    "static",
-    "import",
-    "from",
-    "export",
-    "extends"
-  ];
-  var LITERALS = [
-    "true",
-    "false",
-    "null",
-    "undefined",
-    "NaN",
-    "Infinity"
-  ];
-  var TYPES = [
-    "Object",
-    "Function",
-    "Boolean",
-    "Symbol",
-    "Math",
-    "Date",
-    "Number",
-    "BigInt",
-    "String",
-    "RegExp",
-    "Array",
-    "Float32Array",
-    "Float64Array",
-    "Int8Array",
-    "Uint8Array",
-    "Uint8ClampedArray",
-    "Int16Array",
-    "Int32Array",
-    "Uint16Array",
-    "Uint32Array",
-    "BigInt64Array",
-    "BigUint64Array",
-    "Set",
-    "Map",
-    "WeakSet",
-    "WeakMap",
-    "ArrayBuffer",
-    "SharedArrayBuffer",
-    "Atomics",
-    "DataView",
-    "JSON",
-    "Promise",
-    "Generator",
-    "GeneratorFunction",
-    "AsyncFunction",
-    "Reflect",
-    "Proxy",
-    "Intl",
-    "WebAssembly"
-  ];
-  var ERROR_TYPES = [
-    "Error",
-    "EvalError",
-    "InternalError",
-    "RangeError",
-    "ReferenceError",
-    "SyntaxError",
-    "TypeError",
-    "URIError"
-  ];
-  var BUILT_IN_GLOBALS = [
-    "setInterval",
-    "setTimeout",
-    "clearInterval",
-    "clearTimeout",
-    "require",
-    "exports",
-    "eval",
-    "isFinite",
-    "isNaN",
-    "parseFloat",
-    "parseInt",
-    "decodeURI",
-    "decodeURIComponent",
-    "encodeURI",
-    "encodeURIComponent",
-    "escape",
-    "unescape"
-  ];
-  var BUILT_IN_VARIABLES = [
-    "arguments",
-    "this",
-    "super",
-    "console",
-    "window",
-    "document",
-    "localStorage",
-    "sessionStorage",
-    "module",
-    "global"
-  ];
-  var BUILT_INS = [].concat(BUILT_IN_GLOBALS, TYPES, ERROR_TYPES);
   module.exports = javascript;
 });
 
@@ -20190,8 +20476,8 @@ var require_julia = __commonJS((exports, module) => {
       "stdout",
       "true",
       "undef",
-      "\u03C0",
-      "\u212F"
+      "π",
+      "ℯ"
     ];
     const BUILT_IN_LIST = [
       "AbstractArray",
@@ -20502,6 +20788,24 @@ var require_julia_repl = __commonJS((exports, module) => {
 
 // node_modules/highlight.js/lib/languages/kotlin.js
 var require_kotlin = __commonJS((exports, module) => {
+  var decimalDigits = "[0-9](_*[0-9])*";
+  var frac = `\\.(${decimalDigits})`;
+  var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
+  var NUMERIC = {
+    className: "number",
+    variants: [
+      { begin: `(\\b(${decimalDigits})((${frac})|\\.)?|(${frac}))` + `[eE][+-]?(${decimalDigits})[fFdD]?\\b` },
+      { begin: `\\b(${decimalDigits})((${frac})[fFdD]?\\b|\\.([fFdD]\\b)?)` },
+      { begin: `(${frac})[fFdD]?\\b` },
+      { begin: `\\b(${decimalDigits})[fFdD]\\b` },
+      { begin: `\\b0[xX]((${hexDigits})\\.?|(${hexDigits})?\\.(${hexDigits}))` + `[pP][+-]?(${decimalDigits})[fFdD]?\\b` },
+      { begin: "\\b(0|[1-9](_*[0-9])*)[lL]?\\b" },
+      { begin: `\\b0[xX](${hexDigits})[lL]?\\b` },
+      { begin: "\\b0(_*[0-7])*[lL]?\\b" },
+      { begin: "\\b0[bB][01](_*[01])*[lL]?\\b" }
+    ],
+    relevance: 0
+  };
   function kotlin(hljs) {
     const KEYWORDS = {
       keyword: "abstract as val var vararg get set class object open private protected public noinline " + "crossinline dynamic final enum if else do while for when throw try catch finally " + "import package is in fun override companion reified inline lateinit init " + "interface annotation data sealed internal infix operator out by constructor super " + "tailrec where const inner suspend typealias external expect actual",
@@ -20544,8 +20848,8 @@ var require_kotlin = __commonJS((exports, module) => {
           ]
         },
         {
-          begin: "\'",
-          end: "\'",
+          begin: "'",
+          end: "'",
           illegal: /\n/,
           contains: [hljs.BACKSLASH_ESCAPE]
         },
@@ -20711,30 +21015,13 @@ var require_kotlin = __commonJS((exports, module) => {
           className: "meta",
           begin: "^#!/usr/bin/env",
           end: "$",
-          illegal: "\n"
+          illegal: `
+`
         },
         KOTLIN_NUMBER_MODE
       ]
     };
   }
-  var decimalDigits = "[0-9](_*[0-9])*";
-  var frac = `\\.(${decimalDigits})`;
-  var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
-  var NUMERIC = {
-    className: "number",
-    variants: [
-      { begin: `(\\b(${decimalDigits})((${frac})|\\.)?|(${frac}))` + `[eE][+-]?(${decimalDigits})[fFdD]?\\b` },
-      { begin: `\\b(${decimalDigits})((${frac})[fFdD]?\\b|\\.([fFdD]\\b)?)` },
-      { begin: `(${frac})[fFdD]?\\b` },
-      { begin: `\\b(${decimalDigits})[fFdD]\\b` },
-      { begin: `\\b0[xX]((${hexDigits})\\.?|(${hexDigits})?\\.(${hexDigits}))` + `[pP][+-]?(${decimalDigits})[fFdD]?\\b` },
-      { begin: "\\b(0|[1-9](_*[0-9])*)[lL]?\\b" },
-      { begin: `\\b0[xX](${hexDigits})[lL]?\\b` },
-      { begin: "\\b0(_*[0-7])*[lL]?\\b" },
-      { begin: "\\b0[bB][01](_*[01])*[lL]?\\b" }
-    ],
-    relevance: 0
-  };
   module.exports = kotlin;
 });
 
@@ -20766,7 +21053,7 @@ var require_lasso = __commonJS((exports, module) => {
     };
     const LASSO_DATAMEMBER = {
       className: "symbol",
-      begin: "\'" + LASSO_IDENT_RE + "\'"
+      begin: "'" + LASSO_IDENT_RE + "'"
     };
     const LASSO_CODE = [
       hljs.C_LINE_COMMENT_MODE,
@@ -21244,172 +21531,6 @@ var require_leaf = __commonJS((exports, module) => {
 
 // node_modules/highlight.js/lib/languages/less.js
 var require_less = __commonJS((exports, module) => {
-  function less(hljs) {
-    const modes = MODES(hljs);
-    const PSEUDO_SELECTORS$1 = PSEUDO_SELECTORS;
-    const AT_MODIFIERS = "and or not only";
-    const IDENT_RE = "[\\w-]+";
-    const INTERP_IDENT_RE = "(" + IDENT_RE + "|@\\{" + IDENT_RE + "\\})";
-    const RULES = [];
-    const VALUE_MODES = [];
-    const STRING_MODE = function(c) {
-      return {
-        className: "string",
-        begin: "~?" + c + ".*?" + c
-      };
-    };
-    const IDENT_MODE = function(name, begin, relevance) {
-      return {
-        className: name,
-        begin,
-        relevance
-      };
-    };
-    const AT_KEYWORDS = {
-      $pattern: /[a-z-]+/,
-      keyword: AT_MODIFIERS,
-      attribute: MEDIA_FEATURES.join(" ")
-    };
-    const PARENS_MODE = {
-      begin: "\\(",
-      end: "\\)",
-      contains: VALUE_MODES,
-      keywords: AT_KEYWORDS,
-      relevance: 0
-    };
-    VALUE_MODES.push(hljs.C_LINE_COMMENT_MODE, hljs.C_BLOCK_COMMENT_MODE, STRING_MODE("'"), STRING_MODE('"'), modes.CSS_NUMBER_MODE, {
-      begin: "(url|data-uri)\\(",
-      starts: {
-        className: "string",
-        end: "[\\)\\n]",
-        excludeEnd: true
-      }
-    }, modes.HEXCOLOR, PARENS_MODE, IDENT_MODE("variable", "@@?" + IDENT_RE, 10), IDENT_MODE("variable", "@\\{" + IDENT_RE + "\\}"), IDENT_MODE("built_in", "~?`[^`]*?`"), {
-      className: "attribute",
-      begin: IDENT_RE + "\\s*:",
-      end: ":",
-      returnBegin: true,
-      excludeEnd: true
-    }, modes.IMPORTANT, { beginKeywords: "and not" }, modes.FUNCTION_DISPATCH);
-    const VALUE_WITH_RULESETS = VALUE_MODES.concat({
-      begin: /\{/,
-      end: /\}/,
-      contains: RULES
-    });
-    const MIXIN_GUARD_MODE = {
-      beginKeywords: "when",
-      endsWithParent: true,
-      contains: [{ beginKeywords: "and not" }].concat(VALUE_MODES)
-    };
-    const RULE_MODE = {
-      begin: INTERP_IDENT_RE + "\\s*:",
-      returnBegin: true,
-      end: /[;}]/,
-      relevance: 0,
-      contains: [
-        { begin: /-(webkit|moz|ms|o)-/ },
-        modes.CSS_VARIABLE,
-        {
-          className: "attribute",
-          begin: "\\b(" + ATTRIBUTES.join("|") + ")\\b",
-          end: /(?=:)/,
-          starts: {
-            endsWithParent: true,
-            illegal: "[<=$]",
-            relevance: 0,
-            contains: VALUE_MODES
-          }
-        }
-      ]
-    };
-    const AT_RULE_MODE = {
-      className: "keyword",
-      begin: "@(import|media|charset|font-face|(-[a-z]+-)?keyframes|supports|document|namespace|page|viewport|host)\\b",
-      starts: {
-        end: "[;{}]",
-        keywords: AT_KEYWORDS,
-        returnEnd: true,
-        contains: VALUE_MODES,
-        relevance: 0
-      }
-    };
-    const VAR_RULE_MODE = {
-      className: "variable",
-      variants: [
-        {
-          begin: "@" + IDENT_RE + "\\s*:",
-          relevance: 15
-        },
-        { begin: "@" + IDENT_RE }
-      ],
-      starts: {
-        end: "[;}]",
-        returnEnd: true,
-        contains: VALUE_WITH_RULESETS
-      }
-    };
-    const SELECTOR_MODE = {
-      variants: [
-        {
-          begin: "[\\.#:&\\[>]",
-          end: "[;{}]"
-        },
-        {
-          begin: INTERP_IDENT_RE,
-          end: /\{/
-        }
-      ],
-      returnBegin: true,
-      returnEnd: true,
-      illegal: '[<=\'$"]',
-      relevance: 0,
-      contains: [
-        hljs.C_LINE_COMMENT_MODE,
-        hljs.C_BLOCK_COMMENT_MODE,
-        MIXIN_GUARD_MODE,
-        IDENT_MODE("keyword", "all\\b"),
-        IDENT_MODE("variable", "@\\{" + IDENT_RE + "\\}"),
-        {
-          begin: "\\b(" + TAGS.join("|") + ")\\b",
-          className: "selector-tag"
-        },
-        modes.CSS_NUMBER_MODE,
-        IDENT_MODE("selector-tag", INTERP_IDENT_RE, 0),
-        IDENT_MODE("selector-id", "#" + INTERP_IDENT_RE),
-        IDENT_MODE("selector-class", "\\." + INTERP_IDENT_RE, 0),
-        IDENT_MODE("selector-tag", "&", 0),
-        modes.ATTRIBUTE_SELECTOR_MODE,
-        {
-          className: "selector-pseudo",
-          begin: ":(" + PSEUDO_CLASSES.join("|") + ")"
-        },
-        {
-          className: "selector-pseudo",
-          begin: ":(:)?(" + PSEUDO_ELEMENTS.join("|") + ")"
-        },
-        {
-          begin: /\(/,
-          end: /\)/,
-          relevance: 0,
-          contains: VALUE_WITH_RULESETS
-        },
-        { begin: "!important" },
-        modes.FUNCTION_DISPATCH
-      ]
-    };
-    const PSEUDO_SELECTOR_MODE = {
-      begin: IDENT_RE + ":(:)?" + `(${PSEUDO_SELECTORS$1.join("|")})`,
-      returnBegin: true,
-      contains: [SELECTOR_MODE]
-    };
-    RULES.push(hljs.C_LINE_COMMENT_MODE, hljs.C_BLOCK_COMMENT_MODE, AT_RULE_MODE, VAR_RULE_MODE, PSEUDO_SELECTOR_MODE, RULE_MODE, SELECTOR_MODE, MIXIN_GUARD_MODE, modes.FUNCTION_DISPATCH);
-    return {
-      name: "Less",
-      case_insensitive: true,
-      illegal: '[=>\'/<($"]',
-      contains: RULES
-    };
-  }
   var MODES = (hljs) => {
     return {
       IMPORTANT: {
@@ -21691,7 +21812,9 @@ var require_less = __commonJS((exports, module) => {
     "align-self",
     "alignment-baseline",
     "all",
+    "anchor-name",
     "animation",
+    "animation-composition",
     "animation-delay",
     "animation-direction",
     "animation-duration",
@@ -21699,8 +21822,14 @@ var require_less = __commonJS((exports, module) => {
     "animation-iteration-count",
     "animation-name",
     "animation-play-state",
+    "animation-range",
+    "animation-range-end",
+    "animation-range-start",
+    "animation-timeline",
     "animation-timing-function",
     "appearance",
+    "aspect-ratio",
+    "backdrop-filter",
     "backface-visibility",
     "background",
     "background-attachment",
@@ -21710,6 +21839,8 @@ var require_less = __commonJS((exports, module) => {
     "background-image",
     "background-origin",
     "background-position",
+    "background-position-x",
+    "background-position-y",
     "background-repeat",
     "background-size",
     "baseline-shift",
@@ -21735,6 +21866,8 @@ var require_less = __commonJS((exports, module) => {
     "border-bottom-width",
     "border-collapse",
     "border-color",
+    "border-end-end-radius",
+    "border-end-start-radius",
     "border-image",
     "border-image-outset",
     "border-image-repeat",
@@ -21759,8 +21892,6 @@ var require_less = __commonJS((exports, module) => {
     "border-left-width",
     "border-radius",
     "border-right",
-    "border-end-end-radius",
-    "border-end-start-radius",
     "border-right-color",
     "border-right-style",
     "border-right-width",
@@ -21776,14 +21907,20 @@ var require_less = __commonJS((exports, module) => {
     "border-top-width",
     "border-width",
     "bottom",
+    "box-align",
     "box-decoration-break",
+    "box-direction",
+    "box-flex",
+    "box-flex-group",
+    "box-lines",
+    "box-ordinal-group",
+    "box-orient",
+    "box-pack",
     "box-shadow",
     "box-sizing",
     "break-after",
     "break-before",
     "break-inside",
-    "cx",
-    "cy",
     "caption-side",
     "caret-color",
     "clear",
@@ -21807,19 +21944,31 @@ var require_less = __commonJS((exports, module) => {
     "column-width",
     "columns",
     "contain",
+    "contain-intrinsic-block-size",
+    "contain-intrinsic-height",
+    "contain-intrinsic-inline-size",
+    "contain-intrinsic-size",
+    "contain-intrinsic-width",
+    "container",
+    "container-name",
+    "container-type",
     "content",
     "content-visibility",
     "counter-increment",
     "counter-reset",
+    "counter-set",
     "cue",
     "cue-after",
     "cue-before",
     "cursor",
+    "cx",
+    "cy",
     "direction",
     "display",
     "dominant-baseline",
     "empty-cells",
     "enable-background",
+    "field-sizing",
     "fill",
     "fill-opacity",
     "fill-rule",
@@ -21832,29 +21981,39 @@ var require_less = __commonJS((exports, module) => {
     "flex-shrink",
     "flex-wrap",
     "float",
-    "flow",
     "flood-color",
     "flood-opacity",
+    "flow",
     "font",
     "font-display",
     "font-family",
     "font-feature-settings",
     "font-kerning",
     "font-language-override",
+    "font-optical-sizing",
+    "font-palette",
     "font-size",
     "font-size-adjust",
+    "font-smooth",
     "font-smoothing",
     "font-stretch",
     "font-style",
     "font-synthesis",
+    "font-synthesis-position",
+    "font-synthesis-small-caps",
+    "font-synthesis-style",
+    "font-synthesis-weight",
     "font-variant",
+    "font-variant-alternates",
     "font-variant-caps",
     "font-variant-east-asian",
+    "font-variant-emoji",
     "font-variant-ligatures",
     "font-variant-numeric",
     "font-variant-position",
     "font-variation-settings",
     "font-weight",
+    "forced-color-adjust",
     "gap",
     "glyph-orientation-horizontal",
     "glyph-orientation-vertical",
@@ -21876,14 +22035,19 @@ var require_less = __commonJS((exports, module) => {
     "grid-template-rows",
     "hanging-punctuation",
     "height",
+    "hyphenate-character",
+    "hyphenate-limit-chars",
     "hyphens",
     "icon",
     "image-orientation",
     "image-rendering",
     "image-resolution",
     "ime-mode",
+    "initial-letter",
+    "initial-letter-align",
     "inline-size",
     "inset",
+    "inset-area",
     "inset-block",
     "inset-block-end",
     "inset-block-start",
@@ -21891,24 +22055,20 @@ var require_less = __commonJS((exports, module) => {
     "inset-inline-end",
     "inset-inline-start",
     "isolation",
-    "kerning",
     "justify-content",
     "justify-items",
     "justify-self",
+    "kerning",
     "left",
     "letter-spacing",
     "lighting-color",
     "line-break",
     "line-height",
+    "line-height-step",
     "list-style",
     "list-style-image",
     "list-style-position",
     "list-style-type",
-    "marker",
-    "marker-end",
-    "marker-mid",
-    "marker-start",
-    "mask",
     "margin",
     "margin-block",
     "margin-block-end",
@@ -21920,6 +22080,11 @@ var require_less = __commonJS((exports, module) => {
     "margin-left",
     "margin-right",
     "margin-top",
+    "margin-trim",
+    "marker",
+    "marker-end",
+    "marker-mid",
+    "marker-start",
     "marks",
     "mask",
     "mask-border",
@@ -21938,6 +22103,10 @@ var require_less = __commonJS((exports, module) => {
     "mask-repeat",
     "mask-size",
     "mask-type",
+    "masonry-auto-flow",
+    "math-depth",
+    "math-shift",
+    "math-style",
     "max-block-size",
     "max-height",
     "max-inline-size",
@@ -21956,6 +22125,12 @@ var require_less = __commonJS((exports, module) => {
     "normal",
     "object-fit",
     "object-position",
+    "offset",
+    "offset-anchor",
+    "offset-distance",
+    "offset-path",
+    "offset-position",
+    "offset-rotate",
     "opacity",
     "order",
     "orphans",
@@ -21965,9 +22140,19 @@ var require_less = __commonJS((exports, module) => {
     "outline-style",
     "outline-width",
     "overflow",
+    "overflow-anchor",
+    "overflow-block",
+    "overflow-clip-margin",
+    "overflow-inline",
     "overflow-wrap",
     "overflow-x",
     "overflow-y",
+    "overlay",
+    "overscroll-behavior",
+    "overscroll-behavior-block",
+    "overscroll-behavior-inline",
+    "overscroll-behavior-x",
+    "overscroll-behavior-y",
     "padding",
     "padding-block",
     "padding-block-end",
@@ -21979,16 +22164,24 @@ var require_less = __commonJS((exports, module) => {
     "padding-left",
     "padding-right",
     "padding-top",
+    "page",
     "page-break-after",
     "page-break-before",
     "page-break-inside",
+    "paint-order",
     "pause",
     "pause-after",
     "pause-before",
     "perspective",
     "perspective-origin",
+    "place-content",
+    "place-items",
+    "place-self",
     "pointer-events",
     "position",
+    "position-anchor",
+    "position-visibility",
+    "print-color-adjust",
     "quotes",
     "r",
     "resize",
@@ -21998,7 +22191,10 @@ var require_less = __commonJS((exports, module) => {
     "right",
     "rotate",
     "row-gap",
+    "ruby-align",
+    "ruby-position",
     "scale",
+    "scroll-behavior",
     "scroll-margin",
     "scroll-margin-block",
     "scroll-margin-block-end",
@@ -22024,6 +22220,9 @@ var require_less = __commonJS((exports, module) => {
     "scroll-snap-align",
     "scroll-snap-stop",
     "scroll-snap-type",
+    "scroll-timeline",
+    "scroll-timeline-axis",
+    "scroll-timeline-name",
     "scrollbar-color",
     "scrollbar-gutter",
     "scrollbar-width",
@@ -22031,6 +22230,9 @@ var require_less = __commonJS((exports, module) => {
     "shape-margin",
     "shape-outside",
     "shape-rendering",
+    "speak",
+    "speak-as",
+    "src",
     "stop-color",
     "stop-opacity",
     "stroke",
@@ -22041,19 +22243,17 @@ var require_less = __commonJS((exports, module) => {
     "stroke-miterlimit",
     "stroke-opacity",
     "stroke-width",
-    "speak",
-    "speak-as",
-    "src",
     "tab-size",
     "table-layout",
-    "text-anchor",
     "text-align",
     "text-align-all",
     "text-align-last",
+    "text-anchor",
     "text-combine-upright",
     "text-decoration",
     "text-decoration-color",
     "text-decoration-line",
+    "text-decoration-skip",
     "text-decoration-skip-ink",
     "text-decoration-style",
     "text-decoration-thickness",
@@ -22067,23 +22267,37 @@ var require_less = __commonJS((exports, module) => {
     "text-overflow",
     "text-rendering",
     "text-shadow",
+    "text-size-adjust",
     "text-transform",
     "text-underline-offset",
     "text-underline-position",
+    "text-wrap",
+    "text-wrap-mode",
+    "text-wrap-style",
+    "timeline-scope",
     "top",
+    "touch-action",
     "transform",
     "transform-box",
     "transform-origin",
     "transform-style",
     "transition",
+    "transition-behavior",
     "transition-delay",
     "transition-duration",
     "transition-property",
     "transition-timing-function",
     "translate",
     "unicode-bidi",
+    "user-modify",
+    "user-select",
     "vector-effect",
     "vertical-align",
+    "view-timeline",
+    "view-timeline-axis",
+    "view-timeline-inset",
+    "view-timeline-name",
+    "view-transition-name",
     "visibility",
     "voice-balance",
     "voice-duration",
@@ -22094,6 +22308,7 @@ var require_less = __commonJS((exports, module) => {
     "voice-stress",
     "voice-volume",
     "white-space",
+    "white-space-collapse",
     "widows",
     "width",
     "will-change",
@@ -22103,9 +22318,176 @@ var require_less = __commonJS((exports, module) => {
     "writing-mode",
     "x",
     "y",
-    "z-index"
+    "z-index",
+    "zoom"
   ].sort().reverse();
   var PSEUDO_SELECTORS = PSEUDO_CLASSES.concat(PSEUDO_ELEMENTS).sort().reverse();
+  function less(hljs) {
+    const modes = MODES(hljs);
+    const PSEUDO_SELECTORS$1 = PSEUDO_SELECTORS;
+    const AT_MODIFIERS = "and or not only";
+    const IDENT_RE = "[\\w-]+";
+    const INTERP_IDENT_RE = "(" + IDENT_RE + "|@\\{" + IDENT_RE + "\\})";
+    const RULES = [];
+    const VALUE_MODES = [];
+    const STRING_MODE = function(c) {
+      return {
+        className: "string",
+        begin: "~?" + c + ".*?" + c
+      };
+    };
+    const IDENT_MODE = function(name, begin, relevance) {
+      return {
+        className: name,
+        begin,
+        relevance
+      };
+    };
+    const AT_KEYWORDS = {
+      $pattern: /[a-z-]+/,
+      keyword: AT_MODIFIERS,
+      attribute: MEDIA_FEATURES.join(" ")
+    };
+    const PARENS_MODE = {
+      begin: "\\(",
+      end: "\\)",
+      contains: VALUE_MODES,
+      keywords: AT_KEYWORDS,
+      relevance: 0
+    };
+    VALUE_MODES.push(hljs.C_LINE_COMMENT_MODE, hljs.C_BLOCK_COMMENT_MODE, STRING_MODE("'"), STRING_MODE('"'), modes.CSS_NUMBER_MODE, {
+      begin: "(url|data-uri)\\(",
+      starts: {
+        className: "string",
+        end: "[\\)\\n]",
+        excludeEnd: true
+      }
+    }, modes.HEXCOLOR, PARENS_MODE, IDENT_MODE("variable", "@@?" + IDENT_RE, 10), IDENT_MODE("variable", "@\\{" + IDENT_RE + "\\}"), IDENT_MODE("built_in", "~?`[^`]*?`"), {
+      className: "attribute",
+      begin: IDENT_RE + "\\s*:",
+      end: ":",
+      returnBegin: true,
+      excludeEnd: true
+    }, modes.IMPORTANT, { beginKeywords: "and not" }, modes.FUNCTION_DISPATCH);
+    const VALUE_WITH_RULESETS = VALUE_MODES.concat({
+      begin: /\{/,
+      end: /\}/,
+      contains: RULES
+    });
+    const MIXIN_GUARD_MODE = {
+      beginKeywords: "when",
+      endsWithParent: true,
+      contains: [{ beginKeywords: "and not" }].concat(VALUE_MODES)
+    };
+    const RULE_MODE = {
+      begin: INTERP_IDENT_RE + "\\s*:",
+      returnBegin: true,
+      end: /[;}]/,
+      relevance: 0,
+      contains: [
+        { begin: /-(webkit|moz|ms|o)-/ },
+        modes.CSS_VARIABLE,
+        {
+          className: "attribute",
+          begin: "\\b(" + ATTRIBUTES.join("|") + ")\\b",
+          end: /(?=:)/,
+          starts: {
+            endsWithParent: true,
+            illegal: "[<=$]",
+            relevance: 0,
+            contains: VALUE_MODES
+          }
+        }
+      ]
+    };
+    const AT_RULE_MODE = {
+      className: "keyword",
+      begin: "@(import|media|charset|font-face|(-[a-z]+-)?keyframes|supports|document|namespace|page|viewport|host)\\b",
+      starts: {
+        end: "[;{}]",
+        keywords: AT_KEYWORDS,
+        returnEnd: true,
+        contains: VALUE_MODES,
+        relevance: 0
+      }
+    };
+    const VAR_RULE_MODE = {
+      className: "variable",
+      variants: [
+        {
+          begin: "@" + IDENT_RE + "\\s*:",
+          relevance: 15
+        },
+        { begin: "@" + IDENT_RE }
+      ],
+      starts: {
+        end: "[;}]",
+        returnEnd: true,
+        contains: VALUE_WITH_RULESETS
+      }
+    };
+    const SELECTOR_MODE = {
+      variants: [
+        {
+          begin: "[\\.#:&\\[>]",
+          end: "[;{}]"
+        },
+        {
+          begin: INTERP_IDENT_RE,
+          end: /\{/
+        }
+      ],
+      returnBegin: true,
+      returnEnd: true,
+      illegal: `[<='$"]`,
+      relevance: 0,
+      contains: [
+        hljs.C_LINE_COMMENT_MODE,
+        hljs.C_BLOCK_COMMENT_MODE,
+        MIXIN_GUARD_MODE,
+        IDENT_MODE("keyword", "all\\b"),
+        IDENT_MODE("variable", "@\\{" + IDENT_RE + "\\}"),
+        {
+          begin: "\\b(" + TAGS.join("|") + ")\\b",
+          className: "selector-tag"
+        },
+        modes.CSS_NUMBER_MODE,
+        IDENT_MODE("selector-tag", INTERP_IDENT_RE, 0),
+        IDENT_MODE("selector-id", "#" + INTERP_IDENT_RE),
+        IDENT_MODE("selector-class", "\\." + INTERP_IDENT_RE, 0),
+        IDENT_MODE("selector-tag", "&", 0),
+        modes.ATTRIBUTE_SELECTOR_MODE,
+        {
+          className: "selector-pseudo",
+          begin: ":(" + PSEUDO_CLASSES.join("|") + ")"
+        },
+        {
+          className: "selector-pseudo",
+          begin: ":(:)?(" + PSEUDO_ELEMENTS.join("|") + ")"
+        },
+        {
+          begin: /\(/,
+          end: /\)/,
+          relevance: 0,
+          contains: VALUE_WITH_RULESETS
+        },
+        { begin: "!important" },
+        modes.FUNCTION_DISPATCH
+      ]
+    };
+    const PSEUDO_SELECTOR_MODE = {
+      begin: IDENT_RE + ":(:)?" + `(${PSEUDO_SELECTORS$1.join("|")})`,
+      returnBegin: true,
+      contains: [SELECTOR_MODE]
+    };
+    RULES.push(hljs.C_LINE_COMMENT_MODE, hljs.C_BLOCK_COMMENT_MODE, AT_RULE_MODE, VAR_RULE_MODE, PSEUDO_SELECTOR_MODE, RULE_MODE, SELECTOR_MODE, MIXIN_GUARD_MODE, modes.FUNCTION_DISPATCH);
+    return {
+      name: "Less",
+      case_insensitive: true,
+      illegal: `[=>'/<($"]`,
+      contains: RULES
+    };
+  }
   module.exports = less;
 });
 
@@ -22172,7 +22554,7 @@ var require_lisp = __commonJS((exports, module) => {
       ],
       variants: [
         {
-          begin: "[\'`]\\(",
+          begin: "['`]\\(",
           end: "\\)"
         },
         {
@@ -22180,12 +22562,12 @@ var require_lisp = __commonJS((exports, module) => {
           end: "\\)",
           keywords: { name: "quote" }
         },
-        { begin: "\'" + MEC_RE }
+        { begin: "'" + MEC_RE }
       ]
     };
     const QUOTED_ATOM = { variants: [
-      { begin: "\'" + LISP_IDENT_RE },
-      { begin: "#\'" + LISP_IDENT_RE + "(::" + LISP_IDENT_RE + ")*" }
+      { begin: "'" + LISP_IDENT_RE },
+      { begin: "#'" + LISP_IDENT_RE + "(::" + LISP_IDENT_RE + ")*" }
     ] };
     const LIST = {
       begin: "\\(\\s*",
@@ -22339,6 +22721,126 @@ var require_livecodeserver = __commonJS((exports, module) => {
 
 // node_modules/highlight.js/lib/languages/livescript.js
 var require_livescript = __commonJS((exports, module) => {
+  var KEYWORDS = [
+    "as",
+    "in",
+    "of",
+    "if",
+    "for",
+    "while",
+    "finally",
+    "var",
+    "new",
+    "function",
+    "do",
+    "return",
+    "void",
+    "else",
+    "break",
+    "catch",
+    "instanceof",
+    "with",
+    "throw",
+    "case",
+    "default",
+    "try",
+    "switch",
+    "continue",
+    "typeof",
+    "delete",
+    "let",
+    "yield",
+    "const",
+    "class",
+    "debugger",
+    "async",
+    "await",
+    "static",
+    "import",
+    "from",
+    "export",
+    "extends",
+    "using"
+  ];
+  var LITERALS = [
+    "true",
+    "false",
+    "null",
+    "undefined",
+    "NaN",
+    "Infinity"
+  ];
+  var TYPES = [
+    "Object",
+    "Function",
+    "Boolean",
+    "Symbol",
+    "Math",
+    "Date",
+    "Number",
+    "BigInt",
+    "String",
+    "RegExp",
+    "Array",
+    "Float32Array",
+    "Float64Array",
+    "Int8Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int16Array",
+    "Int32Array",
+    "Uint16Array",
+    "Uint32Array",
+    "BigInt64Array",
+    "BigUint64Array",
+    "Set",
+    "Map",
+    "WeakSet",
+    "WeakMap",
+    "ArrayBuffer",
+    "SharedArrayBuffer",
+    "Atomics",
+    "DataView",
+    "JSON",
+    "Promise",
+    "Generator",
+    "GeneratorFunction",
+    "AsyncFunction",
+    "Reflect",
+    "Proxy",
+    "Intl",
+    "WebAssembly"
+  ];
+  var ERROR_TYPES = [
+    "Error",
+    "EvalError",
+    "InternalError",
+    "RangeError",
+    "ReferenceError",
+    "SyntaxError",
+    "TypeError",
+    "URIError"
+  ];
+  var BUILT_IN_GLOBALS = [
+    "setInterval",
+    "setTimeout",
+    "clearInterval",
+    "clearTimeout",
+    "require",
+    "exports",
+    "eval",
+    "isFinite",
+    "isNaN",
+    "parseFloat",
+    "parseInt",
+    "decodeURI",
+    "decodeURIComponent",
+    "encodeURI",
+    "encodeURIComponent",
+    "escape",
+    "unescape"
+  ];
+  var BUILT_INS = [].concat(BUILT_IN_GLOBALS, TYPES, ERROR_TYPES);
   function livescript(hljs) {
     const LIVESCRIPT_BUILT_INS = [
       "npm",
@@ -22553,125 +23055,6 @@ var require_livescript = __commonJS((exports, module) => {
       ])
     };
   }
-  var KEYWORDS = [
-    "as",
-    "in",
-    "of",
-    "if",
-    "for",
-    "while",
-    "finally",
-    "var",
-    "new",
-    "function",
-    "do",
-    "return",
-    "void",
-    "else",
-    "break",
-    "catch",
-    "instanceof",
-    "with",
-    "throw",
-    "case",
-    "default",
-    "try",
-    "switch",
-    "continue",
-    "typeof",
-    "delete",
-    "let",
-    "yield",
-    "const",
-    "class",
-    "debugger",
-    "async",
-    "await",
-    "static",
-    "import",
-    "from",
-    "export",
-    "extends"
-  ];
-  var LITERALS = [
-    "true",
-    "false",
-    "null",
-    "undefined",
-    "NaN",
-    "Infinity"
-  ];
-  var TYPES = [
-    "Object",
-    "Function",
-    "Boolean",
-    "Symbol",
-    "Math",
-    "Date",
-    "Number",
-    "BigInt",
-    "String",
-    "RegExp",
-    "Array",
-    "Float32Array",
-    "Float64Array",
-    "Int8Array",
-    "Uint8Array",
-    "Uint8ClampedArray",
-    "Int16Array",
-    "Int32Array",
-    "Uint16Array",
-    "Uint32Array",
-    "BigInt64Array",
-    "BigUint64Array",
-    "Set",
-    "Map",
-    "WeakSet",
-    "WeakMap",
-    "ArrayBuffer",
-    "SharedArrayBuffer",
-    "Atomics",
-    "DataView",
-    "JSON",
-    "Promise",
-    "Generator",
-    "GeneratorFunction",
-    "AsyncFunction",
-    "Reflect",
-    "Proxy",
-    "Intl",
-    "WebAssembly"
-  ];
-  var ERROR_TYPES = [
-    "Error",
-    "EvalError",
-    "InternalError",
-    "RangeError",
-    "ReferenceError",
-    "SyntaxError",
-    "TypeError",
-    "URIError"
-  ];
-  var BUILT_IN_GLOBALS = [
-    "setInterval",
-    "setTimeout",
-    "clearInterval",
-    "clearTimeout",
-    "require",
-    "exports",
-    "eval",
-    "isFinite",
-    "isNaN",
-    "parseFloat",
-    "parseInt",
-    "decodeURI",
-    "decodeURIComponent",
-    "encodeURI",
-    "encodeURIComponent",
-    "escape",
-    "unescape"
-  ];
-  var BUILT_INS = [].concat(BUILT_IN_GLOBALS, TYPES, ERROR_TYPES);
   module.exports = livescript;
 });
 
@@ -22845,6 +23228,7 @@ var require_lua = __commonJS((exports, module) => {
     ];
     return {
       name: "Lua",
+      aliases: ["pluto"],
       keywords: {
         $pattern: hljs.UNDERSCORE_IDENT_RE,
         literal: "true false nil",
@@ -22909,7 +23293,10 @@ var require_makefile = __commonJS((exports, module) => {
       begin: /\$\([\w-]+\s/,
       end: /\)/,
       keywords: { built_in: "subst patsubst strip findstring filter filter-out sort " + "word wordlist firstword lastword dir notdir suffix basename " + "addsuffix addprefix join wildcard realpath abspath error warning " + "shell origin flavor foreach if or and call eval file value" },
-      contains: [VARIABLE]
+      contains: [
+        VARIABLE,
+        QUOTE_STRING
+      ]
     };
     const ASSIGNMENT = { begin: "^" + hljs.UNDERSCORE_IDENT_RE + "\\s*(?=[:+?]?=)" };
     const META = {
@@ -22954,97 +23341,6 @@ var require_makefile = __commonJS((exports, module) => {
 
 // node_modules/highlight.js/lib/languages/mathematica.js
 var require_mathematica = __commonJS((exports, module) => {
-  function mathematica(hljs) {
-    const regex = hljs.regex;
-    const BASE_RE = /([2-9]|[1-2]\d|[3][0-5])\^\^/;
-    const BASE_DIGITS_RE = /(\w*\.\w+|\w+\.\w*|\w+)/;
-    const NUMBER_RE = /(\d*\.\d+|\d+\.\d*|\d+)/;
-    const BASE_NUMBER_RE = regex.either(regex.concat(BASE_RE, BASE_DIGITS_RE), NUMBER_RE);
-    const ACCURACY_RE = /``[+-]?(\d*\.\d+|\d+\.\d*|\d+)/;
-    const PRECISION_RE = /`([+-]?(\d*\.\d+|\d+\.\d*|\d+))?/;
-    const APPROXIMATE_NUMBER_RE = regex.either(ACCURACY_RE, PRECISION_RE);
-    const SCIENTIFIC_NOTATION_RE = /\*\^[+-]?\d+/;
-    const MATHEMATICA_NUMBER_RE = regex.concat(BASE_NUMBER_RE, regex.optional(APPROXIMATE_NUMBER_RE), regex.optional(SCIENTIFIC_NOTATION_RE));
-    const NUMBERS = {
-      className: "number",
-      relevance: 0,
-      begin: MATHEMATICA_NUMBER_RE
-    };
-    const SYMBOL_RE = /[a-zA-Z$][a-zA-Z0-9$]*/;
-    const SYSTEM_SYMBOLS_SET = new Set(SYSTEM_SYMBOLS);
-    const SYMBOLS = { variants: [
-      {
-        className: "builtin-symbol",
-        begin: SYMBOL_RE,
-        "on:begin": (match, response) => {
-          if (!SYSTEM_SYMBOLS_SET.has(match[0]))
-            response.ignoreMatch();
-        }
-      },
-      {
-        className: "symbol",
-        relevance: 0,
-        begin: SYMBOL_RE
-      }
-    ] };
-    const NAMED_CHARACTER = {
-      className: "named-character",
-      begin: /\\\[[$a-zA-Z][$a-zA-Z0-9]+\]/
-    };
-    const OPERATORS = {
-      className: "operator",
-      relevance: 0,
-      begin: /[+\-*/,;.:@~=><&|_`'^?!%]+/
-    };
-    const PATTERNS = {
-      className: "pattern",
-      relevance: 0,
-      begin: /([a-zA-Z$][a-zA-Z0-9$]*)?_+([a-zA-Z$][a-zA-Z0-9$]*)?/
-    };
-    const SLOTS = {
-      className: "slot",
-      relevance: 0,
-      begin: /#[a-zA-Z$][a-zA-Z0-9$]*|#+[0-9]?/
-    };
-    const BRACES = {
-      className: "brace",
-      relevance: 0,
-      begin: /[[\](){}]/
-    };
-    const MESSAGES = {
-      className: "message-name",
-      relevance: 0,
-      begin: regex.concat("::", SYMBOL_RE)
-    };
-    return {
-      name: "Mathematica",
-      aliases: [
-        "mma",
-        "wl"
-      ],
-      classNameAliases: {
-        brace: "punctuation",
-        pattern: "type",
-        slot: "type",
-        symbol: "variable",
-        "named-character": "variable",
-        "builtin-symbol": "built_in",
-        "message-name": "string"
-      },
-      contains: [
-        hljs.COMMENT(/\(\*/, /\*\)/, { contains: ["self"] }),
-        PATTERNS,
-        SLOTS,
-        MESSAGES,
-        SYMBOLS,
-        NAMED_CHARACTER,
-        hljs.QUOTE_STRING_MODE,
-        NUMBERS,
-        OPERATORS,
-        BRACES
-      ]
-    };
-  }
   var SYSTEM_SYMBOLS = [
     "AASTriangle",
     "AbelianGroup",
@@ -30280,13 +30576,104 @@ var require_mathematica = __commonJS((exports, module) => {
     "$WolframID",
     "$WolframUUID"
   ];
+  function mathematica(hljs) {
+    const regex = hljs.regex;
+    const BASE_RE = /([2-9]|[1-2]\d|[3][0-5])\^\^/;
+    const BASE_DIGITS_RE = /(\w*\.\w+|\w+\.\w*|\w+)/;
+    const NUMBER_RE = /(\d*\.\d+|\d+\.\d*|\d+)/;
+    const BASE_NUMBER_RE = regex.either(regex.concat(BASE_RE, BASE_DIGITS_RE), NUMBER_RE);
+    const ACCURACY_RE = /``[+-]?(\d*\.\d+|\d+\.\d*|\d+)/;
+    const PRECISION_RE = /`([+-]?(\d*\.\d+|\d+\.\d*|\d+))?/;
+    const APPROXIMATE_NUMBER_RE = regex.either(ACCURACY_RE, PRECISION_RE);
+    const SCIENTIFIC_NOTATION_RE = /\*\^[+-]?\d+/;
+    const MATHEMATICA_NUMBER_RE = regex.concat(BASE_NUMBER_RE, regex.optional(APPROXIMATE_NUMBER_RE), regex.optional(SCIENTIFIC_NOTATION_RE));
+    const NUMBERS = {
+      className: "number",
+      relevance: 0,
+      begin: MATHEMATICA_NUMBER_RE
+    };
+    const SYMBOL_RE = /[a-zA-Z$][a-zA-Z0-9$]*/;
+    const SYSTEM_SYMBOLS_SET = new Set(SYSTEM_SYMBOLS);
+    const SYMBOLS = { variants: [
+      {
+        className: "builtin-symbol",
+        begin: SYMBOL_RE,
+        "on:begin": (match, response) => {
+          if (!SYSTEM_SYMBOLS_SET.has(match[0]))
+            response.ignoreMatch();
+        }
+      },
+      {
+        className: "symbol",
+        relevance: 0,
+        begin: SYMBOL_RE
+      }
+    ] };
+    const NAMED_CHARACTER = {
+      className: "named-character",
+      begin: /\\\[[$a-zA-Z][$a-zA-Z0-9]+\]/
+    };
+    const OPERATORS = {
+      className: "operator",
+      relevance: 0,
+      begin: /[+\-*/,;.:@~=><&|_`'^?!%]+/
+    };
+    const PATTERNS = {
+      className: "pattern",
+      relevance: 0,
+      begin: /([a-zA-Z$][a-zA-Z0-9$]*)?_+([a-zA-Z$][a-zA-Z0-9$]*)?/
+    };
+    const SLOTS = {
+      className: "slot",
+      relevance: 0,
+      begin: /#[a-zA-Z$][a-zA-Z0-9$]*|#+[0-9]?/
+    };
+    const BRACES = {
+      className: "brace",
+      relevance: 0,
+      begin: /[[\](){}]/
+    };
+    const MESSAGES = {
+      className: "message-name",
+      relevance: 0,
+      begin: regex.concat("::", SYMBOL_RE)
+    };
+    return {
+      name: "Mathematica",
+      aliases: [
+        "mma",
+        "wl"
+      ],
+      classNameAliases: {
+        brace: "punctuation",
+        pattern: "type",
+        slot: "type",
+        symbol: "variable",
+        "named-character": "variable",
+        "builtin-symbol": "built_in",
+        "message-name": "string"
+      },
+      contains: [
+        hljs.COMMENT(/\(\*/, /\*\)/, { contains: ["self"] }),
+        PATTERNS,
+        SLOTS,
+        MESSAGES,
+        SYMBOLS,
+        NAMED_CHARACTER,
+        hljs.QUOTE_STRING_MODE,
+        NUMBERS,
+        OPERATORS,
+        BRACES
+      ]
+    };
+  }
   module.exports = mathematica;
 });
 
 // node_modules/highlight.js/lib/languages/matlab.js
 var require_matlab = __commonJS((exports, module) => {
   function matlab(hljs) {
-    const TRANSPOSE_RE = "(\'|\\.\')+";
+    const TRANSPOSE_RE = "('|\\.')+";
     const TRANSPOSE = {
       relevance: 0,
       contains: [{ begin: TRANSPOSE_RE }]
@@ -30338,9 +30725,9 @@ var require_matlab = __commonJS((exports, module) => {
         },
         {
           className: "string",
-          begin: "\'",
-          end: "\'",
-          contains: [{ begin: "\'\'" }]
+          begin: "'",
+          end: "'",
+          contains: [{ begin: "''" }]
         },
         {
           begin: /\]|\}|\)/,
@@ -30539,8 +30926,8 @@ var require_mipsasm = __commonJS((exports, module) => {
         hljs.QUOTE_STRING_MODE,
         {
           className: "string",
-          begin: "\'",
-          end: "[^\\\\]\'",
+          begin: "'",
+          end: "[^\\\\]'",
           relevance: 0
         },
         {
@@ -30859,7 +31246,7 @@ var require_perl = __commonJS((exports, module) => {
       variants: [
         { begin: /\$\d/ },
         {
-          begin: regex.concat(/[$%@](?!")(\^\w\b|#\w+(::\w+)*|\{\w+\}|\w+(::\w*)*)/, `(?![A-Za-z])(?![@\$%])`)
+          begin: regex.concat(/[$%@](?!")(\^\w\b|#\w+(::\w+)*|\{\w+\}|\w+(::\w*)*)/, `(?![A-Za-z])(?![@$%])`)
         },
         {
           begin: /[$%@](?!")[^\s\w{=]|\$=/,
@@ -30940,8 +31327,8 @@ var require_perl = __commonJS((exports, module) => {
             relevance: 5
           },
           {
-            begin: "\'",
-            end: "\'",
+            begin: "'",
+            end: "'",
             contains: [hljs.BACKSLASH_ESCAPE]
           },
           {
@@ -31697,8 +32084,8 @@ var require_n1ql = __commonJS((exports, module) => {
           contains: [
             {
               className: "string",
-              begin: "\'",
-              end: "\'",
+              begin: "'",
+              end: "'",
               contains: [hljs.BACKSLASH_ESCAPE]
             },
             {
@@ -32002,9 +32389,11 @@ var require_nim = __commonJS((exports, module) => {
       "break",
       "case",
       "cast",
+      "concept",
       "const",
       "continue",
       "converter",
+      "defer",
       "discard",
       "distinct",
       "div",
@@ -32125,88 +32514,342 @@ var require_nim = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/nix.js
 var require_nix = __commonJS((exports, module) => {
   function nix(hljs) {
+    const regex = hljs.regex;
     const KEYWORDS = {
       keyword: [
-        "rec",
-        "with",
-        "let",
+        "assert",
+        "else",
+        "if",
         "in",
         "inherit",
-        "assert",
-        "if",
-        "else",
-        "then"
+        "let",
+        "or",
+        "rec",
+        "then",
+        "with"
       ],
       literal: [
         "true",
         "false",
-        "or",
-        "and",
         "null"
       ],
       built_in: [
-        "import",
         "abort",
         "baseNameOf",
-        "dirOf",
-        "isNull",
         "builtins",
+        "derivation",
+        "derivationStrict",
+        "dirOf",
+        "fetchGit",
+        "fetchMercurial",
+        "fetchTarball",
+        "fetchTree",
+        "fromTOML",
+        "import",
+        "isNull",
         "map",
+        "placeholder",
         "removeAttrs",
+        "scopedImport",
         "throw",
-        "toString",
-        "derivation"
+        "toString"
       ]
     };
-    const ANTIQUOTE = {
-      className: "subst",
-      begin: /\$\{/,
-      end: /\}/,
-      keywords: KEYWORDS
+    const BUILTINS = {
+      scope: "built_in",
+      match: regex.either(...[
+        "abort",
+        "add",
+        "addDrvOutputDependencies",
+        "addErrorContext",
+        "all",
+        "any",
+        "appendContext",
+        "attrNames",
+        "attrValues",
+        "baseNameOf",
+        "bitAnd",
+        "bitOr",
+        "bitXor",
+        "break",
+        "builtins",
+        "catAttrs",
+        "ceil",
+        "compareVersions",
+        "concatLists",
+        "concatMap",
+        "concatStringsSep",
+        "convertHash",
+        "currentSystem",
+        "currentTime",
+        "deepSeq",
+        "derivation",
+        "derivationStrict",
+        "dirOf",
+        "div",
+        "elem",
+        "elemAt",
+        "false",
+        "fetchGit",
+        "fetchMercurial",
+        "fetchTarball",
+        "fetchTree",
+        "fetchurl",
+        "filter",
+        "filterSource",
+        "findFile",
+        "flakeRefToString",
+        "floor",
+        "foldl'",
+        "fromJSON",
+        "fromTOML",
+        "functionArgs",
+        "genList",
+        "genericClosure",
+        "getAttr",
+        "getContext",
+        "getEnv",
+        "getFlake",
+        "groupBy",
+        "hasAttr",
+        "hasContext",
+        "hashFile",
+        "hashString",
+        "head",
+        "import",
+        "intersectAttrs",
+        "isAttrs",
+        "isBool",
+        "isFloat",
+        "isFunction",
+        "isInt",
+        "isList",
+        "isNull",
+        "isPath",
+        "isString",
+        "langVersion",
+        "length",
+        "lessThan",
+        "listToAttrs",
+        "map",
+        "mapAttrs",
+        "match",
+        "mul",
+        "nixPath",
+        "nixVersion",
+        "null",
+        "parseDrvName",
+        "parseFlakeRef",
+        "partition",
+        "path",
+        "pathExists",
+        "placeholder",
+        "readDir",
+        "readFile",
+        "readFileType",
+        "removeAttrs",
+        "replaceStrings",
+        "scopedImport",
+        "seq",
+        "sort",
+        "split",
+        "splitVersion",
+        "storeDir",
+        "storePath",
+        "stringLength",
+        "sub",
+        "substring",
+        "tail",
+        "throw",
+        "toFile",
+        "toJSON",
+        "toPath",
+        "toString",
+        "toXML",
+        "trace",
+        "traceVerbose",
+        "true",
+        "tryEval",
+        "typeOf",
+        "unsafeDiscardOutputDependency",
+        "unsafeDiscardStringContext",
+        "unsafeGetAttrPos",
+        "warn",
+        "zipAttrsWith"
+      ].map((b) => `builtins\\.${b}`)),
+      relevance: 10
     };
-    const ESCAPED_DOLLAR = {
-      className: "char.escape",
-      begin: /''\$/
+    const IDENTIFIER_REGEX = "[A-Za-z_][A-Za-z0-9_'-]*";
+    const LOOKUP_PATH = {
+      scope: "symbol",
+      match: new RegExp(`<${IDENTIFIER_REGEX}(/${IDENTIFIER_REGEX})*>`)
+    };
+    const PATH_PIECE = "[A-Za-z0-9_\\+\\.-]+";
+    const PATH = {
+      scope: "symbol",
+      match: new RegExp(`(\\.\\.|\\.|~)?/(${PATH_PIECE})?(/${PATH_PIECE})*(?=[\\s;])`)
+    };
+    const OPERATOR_WITHOUT_MINUS_REGEX = regex.either(...[
+      "==",
+      "=",
+      "\\+\\+",
+      "\\+",
+      "<=",
+      "<\\|",
+      "<",
+      ">=",
+      ">",
+      "->",
+      "//",
+      "/",
+      "!=",
+      "!",
+      "\\|\\|",
+      "\\|>",
+      "\\?",
+      "\\*",
+      "&&"
+    ]);
+    const OPERATOR = {
+      scope: "operator",
+      match: regex.concat(OPERATOR_WITHOUT_MINUS_REGEX, /(?!-)/),
+      relevance: 0
+    };
+    const NUMBER = {
+      scope: "number",
+      match: new RegExp(`${hljs.NUMBER_RE}(?!-)`),
+      relevance: 0
+    };
+    const MINUS_OPERATOR = {
+      variants: [
+        {
+          scope: "operator",
+          beforeMatch: /\s/,
+          begin: /-(?!>)/
+        },
+        {
+          begin: [
+            new RegExp(`${hljs.NUMBER_RE}`),
+            /-/,
+            /(?!>)/
+          ],
+          beginScope: {
+            1: "number",
+            2: "operator"
+          }
+        },
+        {
+          begin: [
+            OPERATOR_WITHOUT_MINUS_REGEX,
+            /-/,
+            /(?!>)/
+          ],
+          beginScope: {
+            1: "operator",
+            2: "operator"
+          }
+        }
+      ],
+      relevance: 0
     };
     const ATTRS = {
-      begin: /[a-zA-Z0-9-_]+(\s*=)/,
+      beforeMatch: /(^|\{|;)\s*/,
+      begin: new RegExp(`${IDENTIFIER_REGEX}(\\.${IDENTIFIER_REGEX})*\\s*=(?!=)`),
       returnBegin: true,
       relevance: 0,
       contains: [
         {
-          className: "attr",
-          begin: /\S+/,
+          scope: "attr",
+          match: new RegExp(`${IDENTIFIER_REGEX}(\\.${IDENTIFIER_REGEX})*(?=\\s*=)`),
           relevance: 0.2
         }
       ]
     };
+    const NORMAL_ESCAPED_DOLLAR = {
+      scope: "char.escape",
+      match: /\\\$/
+    };
+    const INDENTED_ESCAPED_DOLLAR = {
+      scope: "char.escape",
+      match: /''\$/
+    };
+    const ANTIQUOTE = {
+      scope: "subst",
+      begin: /\$\{/,
+      end: /\}/,
+      keywords: KEYWORDS
+    };
+    const ESCAPED_DOUBLEQUOTE = {
+      scope: "char.escape",
+      match: /'''/
+    };
+    const ESCAPED_LITERAL = {
+      scope: "char.escape",
+      match: /\\(?!\$)./
+    };
     const STRING = {
-      className: "string",
-      contains: [ESCAPED_DOLLAR, ANTIQUOTE],
+      scope: "string",
       variants: [
         {
           begin: "''",
-          end: "''"
+          end: "''",
+          contains: [
+            INDENTED_ESCAPED_DOLLAR,
+            ANTIQUOTE,
+            ESCAPED_DOUBLEQUOTE,
+            ESCAPED_LITERAL
+          ]
         },
         {
           begin: '"',
-          end: '"'
+          end: '"',
+          contains: [
+            NORMAL_ESCAPED_DOLLAR,
+            ANTIQUOTE,
+            ESCAPED_LITERAL
+          ]
         }
       ]
     };
+    const FUNCTION_PARAMS = {
+      scope: "params",
+      match: new RegExp(`${IDENTIFIER_REGEX}\\s*:(?=\\s)`)
+    };
     const EXPRESSIONS = [
-      hljs.NUMBER_MODE,
+      NUMBER,
       hljs.HASH_COMMENT_MODE,
       hljs.C_BLOCK_COMMENT_MODE,
+      hljs.COMMENT(/\/\*\*(?!\/)/, /\*\//, {
+        subLanguage: "markdown",
+        relevance: 0
+      }),
+      BUILTINS,
       STRING,
-      ATTRS
+      LOOKUP_PATH,
+      PATH,
+      FUNCTION_PARAMS,
+      ATTRS,
+      MINUS_OPERATOR,
+      OPERATOR
     ];
     ANTIQUOTE.contains = EXPRESSIONS;
+    const REPL = [
+      {
+        scope: "meta.prompt",
+        match: /^nix-repl>(?=\s)/,
+        relevance: 10
+      },
+      {
+        scope: "meta",
+        beforeMatch: /\s+/,
+        begin: /:([a-z]+|\?)/
+      }
+    ];
     return {
       name: "Nix",
       aliases: ["nixos"],
       keywords: KEYWORDS,
-      contains: EXPRESSIONS
+      contains: EXPRESSIONS.concat(REPL)
     };
   }
   module.exports = nix;
@@ -32418,8 +33061,8 @@ var require_nsis = __commonJS((exports, module) => {
           end: '"'
         },
         {
-          begin: "\'",
-          end: "\'"
+          begin: "'",
+          end: "'"
         },
         {
           begin: "`",
@@ -33025,19 +33668,19 @@ var require_ocaml = __commonJS((exports, module) => {
         hljs.COMMENT("\\(\\*", "\\*\\)", { contains: ["self"] }),
         {
           className: "symbol",
-          begin: "\'[A-Za-z_](?!\')[\\w\']*"
+          begin: "'[A-Za-z_](?!')[\\w']*"
         },
         {
           className: "type",
-          begin: "`[A-Z][\\w\']*"
+          begin: "`[A-Z][\\w']*"
         },
         {
           className: "type",
-          begin: "\\b[A-Z][\\w\']*",
+          begin: "\\b[A-Z][\\w']*",
           relevance: 0
         },
         {
-          begin: "[a-z_]\\w*\'[\\w\']*",
+          begin: "[a-z_]\\w*'[\\w']*",
           relevance: 0
         },
         hljs.inherit(hljs.APOS_STRING_MODE, {
@@ -33141,9 +33784,9 @@ var require_oxygene = __commonJS((exports, module) => {
     const PAREN_COMMENT = hljs.COMMENT("\\(\\*", "\\*\\)", { relevance: 10 });
     const STRING = {
       className: "string",
-      begin: "\'",
-      end: "\'",
-      contains: [{ begin: "\'\'" }]
+      begin: "'",
+      end: "'",
+      contains: [{ begin: "''" }]
     };
     const CHAR_STRING = {
       className: "string",
@@ -33425,14 +34068,14 @@ var require_pgsql = __commonJS((exports, module) => {
         },
         {
           className: "string",
-          begin: "\'",
-          end: "\'",
-          contains: [{ begin: "\'\'" }]
+          begin: "'",
+          end: "'",
+          contains: [{ begin: "''" }]
         },
         {
           className: "string",
-          begin: "(e|E|u&|U&)\'",
-          end: "\'",
+          begin: "(e|E|u&|U&)'",
+          end: "'",
           contains: [{ begin: "\\\\." }],
           relevance: 10
         },
@@ -33502,6 +34145,7 @@ var require_php = __commonJS((exports, module) => {
     const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
     const IDENT_RE = regex.concat(/[a-zA-Z_\x7f-\xff][a-zA-Z0-9_\x7f-\xff]*/, NOT_PERL_ETC);
     const PASCAL_CASE_CLASS_NAME_RE = regex.concat(/(\\?[A-Z][a-z0-9_\x7f-\xff]+|\\?[A-Z]+(?=[A-Z][a-z0-9_\x7f-\xff])){1,}/, NOT_PERL_ETC);
+    const UPCASE_NAME_RE = regex.concat(/[A-Z]+/, NOT_PERL_ETC);
     const VARIABLE = {
       scope: "variable",
       match: "\\$+" + IDENT_RE
@@ -33546,7 +34190,8 @@ var require_php = __commonJS((exports, module) => {
       begin: /<<<[ \t]*'(\w+)'\n/,
       end: /[ \t]*(\w+)\b/
     });
-    const WHITESPACE = "[ \t\n]";
+    const WHITESPACE = `[ 	
+]`;
     const STRING = {
       scope: "string",
       variants: [
@@ -33876,7 +34521,7 @@ var require_php = __commonJS((exports, module) => {
       CONSTRUCTOR_CALL
     ];
     const ATTRIBUTES = {
-      begin: regex.concat(/#\[\s*/, PASCAL_CASE_CLASS_NAME_RE),
+      begin: regex.concat(/#\[\s*\\?/, regex.either(PASCAL_CASE_CLASS_NAME_RE, UPCASE_NAME_RE)),
       beginScope: "meta",
       end: /]/,
       endScope: "meta",
@@ -33906,7 +34551,10 @@ var require_php = __commonJS((exports, module) => {
         ...ATTRIBUTE_CONTAINS,
         {
           scope: "meta",
-          match: PASCAL_CASE_CLASS_NAME_RE
+          variants: [
+            { match: PASCAL_CASE_CLASS_NAME_RE },
+            { match: UPCASE_NAME_RE }
+          ]
         }
       ]
     };
@@ -33981,6 +34629,7 @@ var require_php = __commonJS((exports, module) => {
               keywords: KEYWORDS,
               contains: [
                 "self",
+                ATTRIBUTES,
                 VARIABLE,
                 LEFT_AND_RIGHT_SIDE_OF_DOUBLE_COLON,
                 hljs.C_BLOCK_COMMENT_MODE,
@@ -34060,8 +34709,8 @@ var require_php_template = __commonJS((exports, module) => {
               skip: true
             },
             {
-              begin: "b\'",
-              end: "\'",
+              begin: "b'",
+              end: "'",
               skip: true
             },
             hljs.inherit(hljs.APOS_STRING_MODE, {
@@ -34121,8 +34770,8 @@ var require_pony = __commonJS((exports, module) => {
     };
     const SINGLE_QUOTE_CHAR_MODE = {
       className: "string",
-      begin: "\'",
-      end: "\'",
+      begin: "'",
+      end: "'",
       contains: [hljs.BACKSLASH_ESCAPE],
       relevance: 0
     };
@@ -34132,7 +34781,7 @@ var require_pony = __commonJS((exports, module) => {
       relevance: 0
     };
     const PRIMED_NAME = {
-      begin: hljs.IDENT_RE + "\'",
+      begin: hljs.IDENT_RE + "'",
       relevance: 0
     };
     const NUMBER_MODE = {
@@ -36670,15 +37319,24 @@ var require_rust = __commonJS((exports, module) => {
           illegal: null
         }),
         {
-          className: "string",
-          variants: [
-            { begin: /b?r(#*)"(.|\n)*?"\1(?!#)/ },
-            { begin: /b?'\\?(x\w{2}|u\w{4}|U\w{8}|.)'/ }
-          ]
+          className: "symbol",
+          begin: /'[a-zA-Z_][a-zA-Z0-9_]*(?!')/
         },
         {
-          className: "symbol",
-          begin: /'[a-zA-Z_][a-zA-Z0-9_]*/
+          scope: "string",
+          variants: [
+            { begin: /b?r(#*)"(.|\n)*?"\1(?!#)/ },
+            {
+              begin: /b?'/,
+              end: /'/,
+              contains: [
+                {
+                  scope: "char.escape",
+                  match: /\\('|\w|x\w{2}|u\w{4}|U\w{8})/
+                }
+              ]
+            }
+          ]
         },
         {
           className: "number",
@@ -37514,12 +38172,12 @@ var require_scala = __commonJS((exports, module) => {
 // node_modules/highlight.js/lib/languages/scheme.js
 var require_scheme = __commonJS((exports, module) => {
   function scheme(hljs) {
-    const SCHEME_IDENT_RE = '[^\\(\\)\\[\\]\\{\\}",\'`;#|\\\\\\s]+';
+    const SCHEME_IDENT_RE = "[^\\(\\)\\[\\]\\{\\}\",'`;#|\\\\\\s]+";
     const SCHEME_SIMPLE_NUMBER_RE = "(-|\\+)?\\d+([./]\\d+)?";
     const SCHEME_COMPLEX_NUMBER_RE = SCHEME_SIMPLE_NUMBER_RE + "[+\\-]" + SCHEME_SIMPLE_NUMBER_RE + "i";
     const KEYWORDS = {
       $pattern: SCHEME_IDENT_RE,
-      built_in: "case-lambda call/cc class define-class exit-handler field import " + "inherit init-field interface let*-values let-values let/ec mixin " + "opt-lambda override protect provide public rename require " + "require-for-syntax syntax syntax-case syntax-error unit/sig unless " + "when with-syntax and begin call-with-current-continuation " + "call-with-input-file call-with-output-file case cond define " + "define-syntax delay do dynamic-wind else for-each if lambda let let* " + "let-syntax letrec letrec-syntax map or syntax-rules \' * + , ,@ - ... / " + "; < <= = => > >= ` abs acos angle append apply asin assoc assq assv atan " + "boolean? caar cadr call-with-input-file call-with-output-file " + "call-with-values car cdddar cddddr cdr ceiling char->integer " + "char-alphabetic? char-ci<=? char-ci<? char-ci=? char-ci>=? char-ci>? " + "char-downcase char-lower-case? char-numeric? char-ready? char-upcase " + "char-upper-case? char-whitespace? char<=? char<? char=? char>=? char>? " + "char? close-input-port close-output-port complex? cons cos " + "current-input-port current-output-port denominator display eof-object? " + "eq? equal? eqv? eval even? exact->inexact exact? exp expt floor " + "force gcd imag-part inexact->exact inexact? input-port? integer->char " + "integer? interaction-environment lcm length list list->string " + "list->vector list-ref list-tail list? load log magnitude make-polar " + "make-rectangular make-string make-vector max member memq memv min " + "modulo negative? newline not null-environment null? number->string " + "number? numerator odd? open-input-file open-output-file output-port? " + "pair? peek-char port? positive? procedure? quasiquote quote quotient " + "rational? rationalize read read-char real-part real? remainder reverse " + "round scheme-report-environment set! set-car! set-cdr! sin sqrt string " + "string->list string->number string->symbol string-append string-ci<=? " + "string-ci<? string-ci=? string-ci>=? string-ci>? string-copy " + "string-fill! string-length string-ref string-set! string<=? string<? " + "string=? string>=? string>? string? substring symbol->string symbol? " + "tan transcript-off transcript-on truncate values vector " + "vector->list vector-fill! vector-length vector-ref vector-set! " + "with-input-from-file with-output-to-file write write-char zero?"
+      built_in: "case-lambda call/cc class define-class exit-handler field import " + "inherit init-field interface let*-values let-values let/ec mixin " + "opt-lambda override protect provide public rename require " + "require-for-syntax syntax syntax-case syntax-error unit/sig unless " + "when with-syntax and begin call-with-current-continuation " + "call-with-input-file call-with-output-file case cond define " + "define-syntax delay do dynamic-wind else for-each if lambda let let* " + "let-syntax letrec letrec-syntax map or syntax-rules ' * + , ,@ - ... / " + "; < <= = => > >= ` abs acos angle append apply asin assoc assq assv atan " + "boolean? caar cadr call-with-input-file call-with-output-file " + "call-with-values car cdddar cddddr cdr ceiling char->integer " + "char-alphabetic? char-ci<=? char-ci<? char-ci=? char-ci>=? char-ci>? " + "char-downcase char-lower-case? char-numeric? char-ready? char-upcase " + "char-upper-case? char-whitespace? char<=? char<? char=? char>=? char>? " + "char? close-input-port close-output-port complex? cons cos " + "current-input-port current-output-port denominator display eof-object? " + "eq? equal? eqv? eval even? exact->inexact exact? exp expt floor " + "force gcd imag-part inexact->exact inexact? input-port? integer->char " + "integer? interaction-environment lcm length list list->string " + "list->vector list-ref list-tail list? load log magnitude make-polar " + "make-rectangular make-string make-vector max member memq memv min " + "modulo negative? newline not null-environment null? number->string " + "number? numerator odd? open-input-file open-output-file output-port? " + "pair? peek-char port? positive? procedure? quasiquote quote quotient " + "rational? rationalize read read-char real-part real? remainder reverse " + "round scheme-report-environment set! set-car! set-cdr! sin sqrt string " + "string->list string->number string->symbol string-append string-ci<=? " + "string-ci<? string-ci=? string-ci>=? string-ci>? string-copy " + "string-fill! string-length string-ref string-set! string<=? string<? " + "string=? string>=? string>? string? substring symbol->string symbol? " + "tan transcript-off transcript-on truncate values vector " + "vector->list vector-fill! vector-length vector-ref vector-set! " + "with-input-from-file with-output-to-file write write-char zero?"
     };
     const LITERAL = {
       className: "literal",
@@ -37552,7 +38210,7 @@ var require_scheme = __commonJS((exports, module) => {
     };
     const QUOTED_IDENT = {
       className: "symbol",
-      begin: "\'" + SCHEME_IDENT_RE
+      begin: "'" + SCHEME_IDENT_RE
     };
     const BODY = {
       endsWithParent: true,
@@ -37656,11 +38314,11 @@ var require_scilab = __commonJS((exports, module) => {
       hljs.C_NUMBER_MODE,
       {
         className: "string",
-        begin: "\'|\"",
-        end: "\'|\"",
+        begin: `'|"`,
+        end: `'|"`,
         contains: [
           hljs.BACKSLASH_ESCAPE,
-          { begin: "\'\'" }
+          { begin: "''" }
         ]
       }
     ];
@@ -37689,12 +38347,12 @@ var require_scilab = __commonJS((exports, module) => {
           ]
         },
         {
-          begin: "[a-zA-Z_][a-zA-Z_0-9]*[\\.\']+",
+          begin: "[a-zA-Z_][a-zA-Z_0-9]*[\\.']+",
           relevance: 0
         },
         {
           begin: "\\[",
-          end: "\\][\\.\']*",
+          end: "\\][\\.']*",
           relevance: 0,
           contains: COMMON_CONTAINS
         },
@@ -37707,113 +38365,6 @@ var require_scilab = __commonJS((exports, module) => {
 
 // node_modules/highlight.js/lib/languages/scss.js
 var require_scss = __commonJS((exports, module) => {
-  function scss(hljs) {
-    const modes = MODES(hljs);
-    const PSEUDO_ELEMENTS$1 = PSEUDO_ELEMENTS;
-    const PSEUDO_CLASSES$1 = PSEUDO_CLASSES;
-    const AT_IDENTIFIER = "@[a-z-]+";
-    const AT_MODIFIERS = "and or not only";
-    const IDENT_RE = "[a-zA-Z-][a-zA-Z0-9_-]*";
-    const VARIABLE = {
-      className: "variable",
-      begin: "(\\$" + IDENT_RE + ")\\b",
-      relevance: 0
-    };
-    return {
-      name: "SCSS",
-      case_insensitive: true,
-      illegal: "[=/|\']",
-      contains: [
-        hljs.C_LINE_COMMENT_MODE,
-        hljs.C_BLOCK_COMMENT_MODE,
-        modes.CSS_NUMBER_MODE,
-        {
-          className: "selector-id",
-          begin: "#[A-Za-z0-9_-]+",
-          relevance: 0
-        },
-        {
-          className: "selector-class",
-          begin: "\\.[A-Za-z0-9_-]+",
-          relevance: 0
-        },
-        modes.ATTRIBUTE_SELECTOR_MODE,
-        {
-          className: "selector-tag",
-          begin: "\\b(" + TAGS.join("|") + ")\\b",
-          relevance: 0
-        },
-        {
-          className: "selector-pseudo",
-          begin: ":(" + PSEUDO_CLASSES$1.join("|") + ")"
-        },
-        {
-          className: "selector-pseudo",
-          begin: ":(:)?(" + PSEUDO_ELEMENTS$1.join("|") + ")"
-        },
-        VARIABLE,
-        {
-          begin: /\(/,
-          end: /\)/,
-          contains: [modes.CSS_NUMBER_MODE]
-        },
-        modes.CSS_VARIABLE,
-        {
-          className: "attribute",
-          begin: "\\b(" + ATTRIBUTES.join("|") + ")\\b"
-        },
-        { begin: "\\b(whitespace|wait|w-resize|visible|vertical-text|vertical-ideographic|uppercase|upper-roman|upper-alpha|underline|transparent|top|thin|thick|text|text-top|text-bottom|tb-rl|table-header-group|table-footer-group|sw-resize|super|strict|static|square|solid|small-caps|separate|se-resize|scroll|s-resize|rtl|row-resize|ridge|right|repeat|repeat-y|repeat-x|relative|progress|pointer|overline|outside|outset|oblique|nowrap|not-allowed|normal|none|nw-resize|no-repeat|no-drop|newspaper|ne-resize|n-resize|move|middle|medium|ltr|lr-tb|lowercase|lower-roman|lower-alpha|loose|list-item|line|line-through|line-edge|lighter|left|keep-all|justify|italic|inter-word|inter-ideograph|inside|inset|inline|inline-block|inherit|inactive|ideograph-space|ideograph-parenthesis|ideograph-numeric|ideograph-alpha|horizontal|hidden|help|hand|groove|fixed|ellipsis|e-resize|double|dotted|distribute|distribute-space|distribute-letter|distribute-all-lines|disc|disabled|default|decimal|dashed|crosshair|collapse|col-resize|circle|char|center|capitalize|break-word|break-all|bottom|both|bolder|bold|block|bidi-override|below|baseline|auto|always|all-scroll|absolute|table|table-cell)\\b" },
-        {
-          begin: /:/,
-          end: /[;}{]/,
-          relevance: 0,
-          contains: [
-            modes.BLOCK_COMMENT,
-            VARIABLE,
-            modes.HEXCOLOR,
-            modes.CSS_NUMBER_MODE,
-            hljs.QUOTE_STRING_MODE,
-            hljs.APOS_STRING_MODE,
-            modes.IMPORTANT,
-            modes.FUNCTION_DISPATCH
-          ]
-        },
-        {
-          begin: "@(page|font-face)",
-          keywords: {
-            $pattern: AT_IDENTIFIER,
-            keyword: "@page @font-face"
-          }
-        },
-        {
-          begin: "@",
-          end: "[{;]",
-          returnBegin: true,
-          keywords: {
-            $pattern: /[a-z-]+/,
-            keyword: AT_MODIFIERS,
-            attribute: MEDIA_FEATURES.join(" ")
-          },
-          contains: [
-            {
-              begin: AT_IDENTIFIER,
-              className: "keyword"
-            },
-            {
-              begin: /[a-z-]+(?=:)/,
-              className: "attribute"
-            },
-            VARIABLE,
-            hljs.QUOTE_STRING_MODE,
-            hljs.APOS_STRING_MODE,
-            modes.HEXCOLOR,
-            modes.CSS_NUMBER_MODE
-          ]
-        },
-        modes.FUNCTION_DISPATCH
-      ]
-    };
-  }
   var MODES = (hljs) => {
     return {
       IMPORTANT: {
@@ -38095,7 +38646,9 @@ var require_scss = __commonJS((exports, module) => {
     "align-self",
     "alignment-baseline",
     "all",
+    "anchor-name",
     "animation",
+    "animation-composition",
     "animation-delay",
     "animation-direction",
     "animation-duration",
@@ -38103,8 +38656,14 @@ var require_scss = __commonJS((exports, module) => {
     "animation-iteration-count",
     "animation-name",
     "animation-play-state",
+    "animation-range",
+    "animation-range-end",
+    "animation-range-start",
+    "animation-timeline",
     "animation-timing-function",
     "appearance",
+    "aspect-ratio",
+    "backdrop-filter",
     "backface-visibility",
     "background",
     "background-attachment",
@@ -38114,6 +38673,8 @@ var require_scss = __commonJS((exports, module) => {
     "background-image",
     "background-origin",
     "background-position",
+    "background-position-x",
+    "background-position-y",
     "background-repeat",
     "background-size",
     "baseline-shift",
@@ -38139,6 +38700,8 @@ var require_scss = __commonJS((exports, module) => {
     "border-bottom-width",
     "border-collapse",
     "border-color",
+    "border-end-end-radius",
+    "border-end-start-radius",
     "border-image",
     "border-image-outset",
     "border-image-repeat",
@@ -38163,8 +38726,6 @@ var require_scss = __commonJS((exports, module) => {
     "border-left-width",
     "border-radius",
     "border-right",
-    "border-end-end-radius",
-    "border-end-start-radius",
     "border-right-color",
     "border-right-style",
     "border-right-width",
@@ -38180,14 +38741,20 @@ var require_scss = __commonJS((exports, module) => {
     "border-top-width",
     "border-width",
     "bottom",
+    "box-align",
     "box-decoration-break",
+    "box-direction",
+    "box-flex",
+    "box-flex-group",
+    "box-lines",
+    "box-ordinal-group",
+    "box-orient",
+    "box-pack",
     "box-shadow",
     "box-sizing",
     "break-after",
     "break-before",
     "break-inside",
-    "cx",
-    "cy",
     "caption-side",
     "caret-color",
     "clear",
@@ -38211,19 +38778,31 @@ var require_scss = __commonJS((exports, module) => {
     "column-width",
     "columns",
     "contain",
+    "contain-intrinsic-block-size",
+    "contain-intrinsic-height",
+    "contain-intrinsic-inline-size",
+    "contain-intrinsic-size",
+    "contain-intrinsic-width",
+    "container",
+    "container-name",
+    "container-type",
     "content",
     "content-visibility",
     "counter-increment",
     "counter-reset",
+    "counter-set",
     "cue",
     "cue-after",
     "cue-before",
     "cursor",
+    "cx",
+    "cy",
     "direction",
     "display",
     "dominant-baseline",
     "empty-cells",
     "enable-background",
+    "field-sizing",
     "fill",
     "fill-opacity",
     "fill-rule",
@@ -38236,29 +38815,39 @@ var require_scss = __commonJS((exports, module) => {
     "flex-shrink",
     "flex-wrap",
     "float",
-    "flow",
     "flood-color",
     "flood-opacity",
+    "flow",
     "font",
     "font-display",
     "font-family",
     "font-feature-settings",
     "font-kerning",
     "font-language-override",
+    "font-optical-sizing",
+    "font-palette",
     "font-size",
     "font-size-adjust",
+    "font-smooth",
     "font-smoothing",
     "font-stretch",
     "font-style",
     "font-synthesis",
+    "font-synthesis-position",
+    "font-synthesis-small-caps",
+    "font-synthesis-style",
+    "font-synthesis-weight",
     "font-variant",
+    "font-variant-alternates",
     "font-variant-caps",
     "font-variant-east-asian",
+    "font-variant-emoji",
     "font-variant-ligatures",
     "font-variant-numeric",
     "font-variant-position",
     "font-variation-settings",
     "font-weight",
+    "forced-color-adjust",
     "gap",
     "glyph-orientation-horizontal",
     "glyph-orientation-vertical",
@@ -38280,14 +38869,19 @@ var require_scss = __commonJS((exports, module) => {
     "grid-template-rows",
     "hanging-punctuation",
     "height",
+    "hyphenate-character",
+    "hyphenate-limit-chars",
     "hyphens",
     "icon",
     "image-orientation",
     "image-rendering",
     "image-resolution",
     "ime-mode",
+    "initial-letter",
+    "initial-letter-align",
     "inline-size",
     "inset",
+    "inset-area",
     "inset-block",
     "inset-block-end",
     "inset-block-start",
@@ -38295,24 +38889,20 @@ var require_scss = __commonJS((exports, module) => {
     "inset-inline-end",
     "inset-inline-start",
     "isolation",
-    "kerning",
     "justify-content",
     "justify-items",
     "justify-self",
+    "kerning",
     "left",
     "letter-spacing",
     "lighting-color",
     "line-break",
     "line-height",
+    "line-height-step",
     "list-style",
     "list-style-image",
     "list-style-position",
     "list-style-type",
-    "marker",
-    "marker-end",
-    "marker-mid",
-    "marker-start",
-    "mask",
     "margin",
     "margin-block",
     "margin-block-end",
@@ -38324,6 +38914,11 @@ var require_scss = __commonJS((exports, module) => {
     "margin-left",
     "margin-right",
     "margin-top",
+    "margin-trim",
+    "marker",
+    "marker-end",
+    "marker-mid",
+    "marker-start",
     "marks",
     "mask",
     "mask-border",
@@ -38342,6 +38937,10 @@ var require_scss = __commonJS((exports, module) => {
     "mask-repeat",
     "mask-size",
     "mask-type",
+    "masonry-auto-flow",
+    "math-depth",
+    "math-shift",
+    "math-style",
     "max-block-size",
     "max-height",
     "max-inline-size",
@@ -38360,6 +38959,12 @@ var require_scss = __commonJS((exports, module) => {
     "normal",
     "object-fit",
     "object-position",
+    "offset",
+    "offset-anchor",
+    "offset-distance",
+    "offset-path",
+    "offset-position",
+    "offset-rotate",
     "opacity",
     "order",
     "orphans",
@@ -38369,9 +38974,19 @@ var require_scss = __commonJS((exports, module) => {
     "outline-style",
     "outline-width",
     "overflow",
+    "overflow-anchor",
+    "overflow-block",
+    "overflow-clip-margin",
+    "overflow-inline",
     "overflow-wrap",
     "overflow-x",
     "overflow-y",
+    "overlay",
+    "overscroll-behavior",
+    "overscroll-behavior-block",
+    "overscroll-behavior-inline",
+    "overscroll-behavior-x",
+    "overscroll-behavior-y",
     "padding",
     "padding-block",
     "padding-block-end",
@@ -38383,16 +38998,24 @@ var require_scss = __commonJS((exports, module) => {
     "padding-left",
     "padding-right",
     "padding-top",
+    "page",
     "page-break-after",
     "page-break-before",
     "page-break-inside",
+    "paint-order",
     "pause",
     "pause-after",
     "pause-before",
     "perspective",
     "perspective-origin",
+    "place-content",
+    "place-items",
+    "place-self",
     "pointer-events",
     "position",
+    "position-anchor",
+    "position-visibility",
+    "print-color-adjust",
     "quotes",
     "r",
     "resize",
@@ -38402,7 +39025,10 @@ var require_scss = __commonJS((exports, module) => {
     "right",
     "rotate",
     "row-gap",
+    "ruby-align",
+    "ruby-position",
     "scale",
+    "scroll-behavior",
     "scroll-margin",
     "scroll-margin-block",
     "scroll-margin-block-end",
@@ -38428,6 +39054,9 @@ var require_scss = __commonJS((exports, module) => {
     "scroll-snap-align",
     "scroll-snap-stop",
     "scroll-snap-type",
+    "scroll-timeline",
+    "scroll-timeline-axis",
+    "scroll-timeline-name",
     "scrollbar-color",
     "scrollbar-gutter",
     "scrollbar-width",
@@ -38435,6 +39064,9 @@ var require_scss = __commonJS((exports, module) => {
     "shape-margin",
     "shape-outside",
     "shape-rendering",
+    "speak",
+    "speak-as",
+    "src",
     "stop-color",
     "stop-opacity",
     "stroke",
@@ -38445,19 +39077,17 @@ var require_scss = __commonJS((exports, module) => {
     "stroke-miterlimit",
     "stroke-opacity",
     "stroke-width",
-    "speak",
-    "speak-as",
-    "src",
     "tab-size",
     "table-layout",
-    "text-anchor",
     "text-align",
     "text-align-all",
     "text-align-last",
+    "text-anchor",
     "text-combine-upright",
     "text-decoration",
     "text-decoration-color",
     "text-decoration-line",
+    "text-decoration-skip",
     "text-decoration-skip-ink",
     "text-decoration-style",
     "text-decoration-thickness",
@@ -38471,23 +39101,37 @@ var require_scss = __commonJS((exports, module) => {
     "text-overflow",
     "text-rendering",
     "text-shadow",
+    "text-size-adjust",
     "text-transform",
     "text-underline-offset",
     "text-underline-position",
+    "text-wrap",
+    "text-wrap-mode",
+    "text-wrap-style",
+    "timeline-scope",
     "top",
+    "touch-action",
     "transform",
     "transform-box",
     "transform-origin",
     "transform-style",
     "transition",
+    "transition-behavior",
     "transition-delay",
     "transition-duration",
     "transition-property",
     "transition-timing-function",
     "translate",
     "unicode-bidi",
+    "user-modify",
+    "user-select",
     "vector-effect",
     "vertical-align",
+    "view-timeline",
+    "view-timeline-axis",
+    "view-timeline-inset",
+    "view-timeline-name",
+    "view-transition-name",
     "visibility",
     "voice-balance",
     "voice-duration",
@@ -38498,6 +39142,7 @@ var require_scss = __commonJS((exports, module) => {
     "voice-stress",
     "voice-volume",
     "white-space",
+    "white-space-collapse",
     "widows",
     "width",
     "will-change",
@@ -38507,8 +39152,116 @@ var require_scss = __commonJS((exports, module) => {
     "writing-mode",
     "x",
     "y",
-    "z-index"
+    "z-index",
+    "zoom"
   ].sort().reverse();
+  function scss(hljs) {
+    const modes = MODES(hljs);
+    const PSEUDO_ELEMENTS$1 = PSEUDO_ELEMENTS;
+    const PSEUDO_CLASSES$1 = PSEUDO_CLASSES;
+    const AT_IDENTIFIER = "@[a-z-]+";
+    const AT_MODIFIERS = "and or not only";
+    const IDENT_RE = "[a-zA-Z-][a-zA-Z0-9_-]*";
+    const VARIABLE = {
+      className: "variable",
+      begin: "(\\$" + IDENT_RE + ")\\b",
+      relevance: 0
+    };
+    return {
+      name: "SCSS",
+      case_insensitive: true,
+      illegal: "[=/|']",
+      contains: [
+        hljs.C_LINE_COMMENT_MODE,
+        hljs.C_BLOCK_COMMENT_MODE,
+        modes.CSS_NUMBER_MODE,
+        {
+          className: "selector-id",
+          begin: "#[A-Za-z0-9_-]+",
+          relevance: 0
+        },
+        {
+          className: "selector-class",
+          begin: "\\.[A-Za-z0-9_-]+",
+          relevance: 0
+        },
+        modes.ATTRIBUTE_SELECTOR_MODE,
+        {
+          className: "selector-tag",
+          begin: "\\b(" + TAGS.join("|") + ")\\b",
+          relevance: 0
+        },
+        {
+          className: "selector-pseudo",
+          begin: ":(" + PSEUDO_CLASSES$1.join("|") + ")"
+        },
+        {
+          className: "selector-pseudo",
+          begin: ":(:)?(" + PSEUDO_ELEMENTS$1.join("|") + ")"
+        },
+        VARIABLE,
+        {
+          begin: /\(/,
+          end: /\)/,
+          contains: [modes.CSS_NUMBER_MODE]
+        },
+        modes.CSS_VARIABLE,
+        {
+          className: "attribute",
+          begin: "\\b(" + ATTRIBUTES.join("|") + ")\\b"
+        },
+        { begin: "\\b(whitespace|wait|w-resize|visible|vertical-text|vertical-ideographic|uppercase|upper-roman|upper-alpha|underline|transparent|top|thin|thick|text|text-top|text-bottom|tb-rl|table-header-group|table-footer-group|sw-resize|super|strict|static|square|solid|small-caps|separate|se-resize|scroll|s-resize|rtl|row-resize|ridge|right|repeat|repeat-y|repeat-x|relative|progress|pointer|overline|outside|outset|oblique|nowrap|not-allowed|normal|none|nw-resize|no-repeat|no-drop|newspaper|ne-resize|n-resize|move|middle|medium|ltr|lr-tb|lowercase|lower-roman|lower-alpha|loose|list-item|line|line-through|line-edge|lighter|left|keep-all|justify|italic|inter-word|inter-ideograph|inside|inset|inline|inline-block|inherit|inactive|ideograph-space|ideograph-parenthesis|ideograph-numeric|ideograph-alpha|horizontal|hidden|help|hand|groove|fixed|ellipsis|e-resize|double|dotted|distribute|distribute-space|distribute-letter|distribute-all-lines|disc|disabled|default|decimal|dashed|crosshair|collapse|col-resize|circle|char|center|capitalize|break-word|break-all|bottom|both|bolder|bold|block|bidi-override|below|baseline|auto|always|all-scroll|absolute|table|table-cell)\\b" },
+        {
+          begin: /:/,
+          end: /[;}{]/,
+          relevance: 0,
+          contains: [
+            modes.BLOCK_COMMENT,
+            VARIABLE,
+            modes.HEXCOLOR,
+            modes.CSS_NUMBER_MODE,
+            hljs.QUOTE_STRING_MODE,
+            hljs.APOS_STRING_MODE,
+            modes.IMPORTANT,
+            modes.FUNCTION_DISPATCH
+          ]
+        },
+        {
+          begin: "@(page|font-face)",
+          keywords: {
+            $pattern: AT_IDENTIFIER,
+            keyword: "@page @font-face"
+          }
+        },
+        {
+          begin: "@",
+          end: "[{;]",
+          returnBegin: true,
+          keywords: {
+            $pattern: /[a-z-]+/,
+            keyword: AT_MODIFIERS,
+            attribute: MEDIA_FEATURES.join(" ")
+          },
+          contains: [
+            {
+              begin: AT_IDENTIFIER,
+              className: "keyword"
+            },
+            {
+              begin: /[a-z-]+(?=:)/,
+              className: "attribute"
+            },
+            VARIABLE,
+            hljs.QUOTE_STRING_MODE,
+            hljs.APOS_STRING_MODE,
+            modes.HEXCOLOR,
+            modes.CSS_NUMBER_MODE
+          ]
+        },
+        modes.FUNCTION_DISPATCH
+      ]
+    };
+  }
   module.exports = scss;
 });
 
@@ -38737,19 +39490,19 @@ var require_sml = __commonJS((exports, module) => {
         hljs.COMMENT("\\(\\*", "\\*\\)", { contains: ["self"] }),
         {
           className: "symbol",
-          begin: "\'[A-Za-z_](?!\')[\\w\']*"
+          begin: "'[A-Za-z_](?!')[\\w']*"
         },
         {
           className: "type",
-          begin: "`[A-Z][\\w\']*"
+          begin: "`[A-Z][\\w']*"
         },
         {
           className: "type",
-          begin: "\\b[A-Z][\\w\']*",
+          begin: "\\b[A-Z][\\w']*",
           relevance: 0
         },
         {
-          begin: "[a-z_]\\w*\'[\\w\']*"
+          begin: "[a-z_]\\w*'[\\w']*"
         },
         hljs.inherit(hljs.APOS_STRING_MODE, {
           className: "string",
@@ -38795,11 +39548,11 @@ var require_sqf = __commonJS((exports, module) => {
           ]
         },
         {
-          begin: "\'",
-          end: "\'",
+          begin: "'",
+          end: "'",
           contains: [
             {
-              begin: "\'\'",
+              begin: "''",
               relevance: 0
             }
           ]
@@ -41384,19 +42137,19 @@ var require_sql = __commonJS((exports, module) => {
     const regex = hljs.regex;
     const COMMENT_MODE = hljs.COMMENT("--", "$");
     const STRING = {
-      className: "string",
+      scope: "string",
       variants: [
         {
           begin: /'/,
           end: /'/,
-          contains: [{ begin: /''/ }]
+          contains: [{ match: /''/ }]
         }
       ]
     };
     const QUOTED_IDENTIFIER = {
       begin: /"/,
       end: /"/,
-      contains: [{ begin: /""/ }]
+      contains: [{ match: /""/ }]
     };
     const LITERALS = [
       "true",
@@ -41946,18 +42699,28 @@ var require_sql = __commonJS((exports, module) => {
       return !RESERVED_FUNCTIONS.includes(keyword);
     });
     const VARIABLE = {
-      className: "variable",
-      begin: /@[a-z0-9][a-z0-9_]*/
+      scope: "variable",
+      match: /@[a-z0-9][a-z0-9_]*/
     };
     const OPERATOR = {
-      className: "operator",
-      begin: /[-+*/=%^~]|&&?|\|\|?|!=?|<(?:=>?|<|>)?|>[>=]?/,
+      scope: "operator",
+      match: /[-+*/=%^~]|&&?|\|\|?|!=?|<(?:=>?|<|>)?|>[>=]?/,
       relevance: 0
     };
     const FUNCTION_CALL = {
-      begin: regex.concat(/\b/, regex.either(...FUNCTIONS), /\s*\(/),
+      match: regex.concat(/\b/, regex.either(...FUNCTIONS), /\s*\(/),
       relevance: 0,
       keywords: { built_in: FUNCTIONS }
+    };
+    function kws_to_regex(list) {
+      return regex.concat(/\b/, regex.either(...list.map((kw) => {
+        return kw.replace(/\s+/, "\\s+");
+      })), /\b/);
+    }
+    const MULTI_WORD_KEYWORDS = {
+      scope: "keyword",
+      match: kws_to_regex(COMBOS),
+      relevance: 0
     };
     function reduceRelevancy(list, {
       exceptions,
@@ -41988,19 +42751,10 @@ var require_sql = __commonJS((exports, module) => {
       },
       contains: [
         {
-          begin: regex.either(...COMBOS),
-          relevance: 0,
-          keywords: {
-            $pattern: /[\w\.]+/,
-            keyword: KEYWORDS.concat(COMBOS),
-            literal: LITERALS,
-            type: TYPES
-          }
+          scope: "type",
+          match: kws_to_regex(MULTI_WORD_TYPES)
         },
-        {
-          className: "type",
-          begin: regex.either(...MULTI_WORD_TYPES)
-        },
+        MULTI_WORD_KEYWORDS,
         FUNCTION_CALL,
         VARIABLE,
         STRING,
@@ -42517,8 +43271,10 @@ var require_stata = __commonJS((exports, module) => {
         {
           className: "string",
           variants: [
-            { begin: '`"[^\r\n]*?"\'' },
-            { begin: '"[^\r\n"]*"' }
+            { begin: `\`"[^\r
+]*?"'` },
+            { begin: `"[^\r
+"]*"` }
           ]
         },
         {
@@ -42597,143 +43353,6 @@ var require_step21 = __commonJS((exports, module) => {
 
 // node_modules/highlight.js/lib/languages/stylus.js
 var require_stylus = __commonJS((exports, module) => {
-  function stylus(hljs) {
-    const modes = MODES(hljs);
-    const AT_MODIFIERS = "and or not only";
-    const VARIABLE = {
-      className: "variable",
-      begin: "\\$" + hljs.IDENT_RE
-    };
-    const AT_KEYWORDS = [
-      "charset",
-      "css",
-      "debug",
-      "extend",
-      "font-face",
-      "for",
-      "import",
-      "include",
-      "keyframes",
-      "media",
-      "mixin",
-      "page",
-      "warn",
-      "while"
-    ];
-    const LOOKAHEAD_TAG_END = "(?=[.\\s\\n[:,(])";
-    const ILLEGAL = [
-      "\\?",
-      "(\\bReturn\\b)",
-      "(\\bEnd\\b)",
-      "(\\bend\\b)",
-      "(\\bdef\\b)",
-      ";",
-      "#\\s",
-      "\\*\\s",
-      "===\\s",
-      "\\|",
-      "%"
-    ];
-    return {
-      name: "Stylus",
-      aliases: ["styl"],
-      case_insensitive: false,
-      keywords: "if else for in",
-      illegal: "(" + ILLEGAL.join("|") + ")",
-      contains: [
-        hljs.QUOTE_STRING_MODE,
-        hljs.APOS_STRING_MODE,
-        hljs.C_LINE_COMMENT_MODE,
-        hljs.C_BLOCK_COMMENT_MODE,
-        modes.HEXCOLOR,
-        {
-          begin: "\\.[a-zA-Z][a-zA-Z0-9_-]*" + LOOKAHEAD_TAG_END,
-          className: "selector-class"
-        },
-        {
-          begin: "#[a-zA-Z][a-zA-Z0-9_-]*" + LOOKAHEAD_TAG_END,
-          className: "selector-id"
-        },
-        {
-          begin: "\\b(" + TAGS.join("|") + ")" + LOOKAHEAD_TAG_END,
-          className: "selector-tag"
-        },
-        {
-          className: "selector-pseudo",
-          begin: "&?:(" + PSEUDO_CLASSES.join("|") + ")" + LOOKAHEAD_TAG_END
-        },
-        {
-          className: "selector-pseudo",
-          begin: "&?:(:)?(" + PSEUDO_ELEMENTS.join("|") + ")" + LOOKAHEAD_TAG_END
-        },
-        modes.ATTRIBUTE_SELECTOR_MODE,
-        {
-          className: "keyword",
-          begin: /@media/,
-          starts: {
-            end: /[{;}]/,
-            keywords: {
-              $pattern: /[a-z-]+/,
-              keyword: AT_MODIFIERS,
-              attribute: MEDIA_FEATURES.join(" ")
-            },
-            contains: [modes.CSS_NUMBER_MODE]
-          }
-        },
-        {
-          className: "keyword",
-          begin: "@((-(o|moz|ms|webkit)-)?(" + AT_KEYWORDS.join("|") + "))\\b"
-        },
-        VARIABLE,
-        modes.CSS_NUMBER_MODE,
-        {
-          className: "function",
-          begin: "^[a-zA-Z][a-zA-Z0-9_-]*\\(.*\\)",
-          illegal: "[\\n]",
-          returnBegin: true,
-          contains: [
-            {
-              className: "title",
-              begin: "\\b[a-zA-Z][a-zA-Z0-9_-]*"
-            },
-            {
-              className: "params",
-              begin: /\(/,
-              end: /\)/,
-              contains: [
-                modes.HEXCOLOR,
-                VARIABLE,
-                hljs.APOS_STRING_MODE,
-                modes.CSS_NUMBER_MODE,
-                hljs.QUOTE_STRING_MODE
-              ]
-            }
-          ]
-        },
-        modes.CSS_VARIABLE,
-        {
-          className: "attribute",
-          begin: "\\b(" + ATTRIBUTES.join("|") + ")\\b",
-          starts: {
-            end: /;|$/,
-            contains: [
-              modes.HEXCOLOR,
-              VARIABLE,
-              hljs.APOS_STRING_MODE,
-              hljs.QUOTE_STRING_MODE,
-              modes.CSS_NUMBER_MODE,
-              hljs.C_BLOCK_COMMENT_MODE,
-              modes.IMPORTANT,
-              modes.FUNCTION_DISPATCH
-            ],
-            illegal: /\./,
-            relevance: 0
-          }
-        },
-        modes.FUNCTION_DISPATCH
-      ]
-    };
-  }
   var MODES = (hljs) => {
     return {
       IMPORTANT: {
@@ -43015,7 +43634,9 @@ var require_stylus = __commonJS((exports, module) => {
     "align-self",
     "alignment-baseline",
     "all",
+    "anchor-name",
     "animation",
+    "animation-composition",
     "animation-delay",
     "animation-direction",
     "animation-duration",
@@ -43023,8 +43644,14 @@ var require_stylus = __commonJS((exports, module) => {
     "animation-iteration-count",
     "animation-name",
     "animation-play-state",
+    "animation-range",
+    "animation-range-end",
+    "animation-range-start",
+    "animation-timeline",
     "animation-timing-function",
     "appearance",
+    "aspect-ratio",
+    "backdrop-filter",
     "backface-visibility",
     "background",
     "background-attachment",
@@ -43034,6 +43661,8 @@ var require_stylus = __commonJS((exports, module) => {
     "background-image",
     "background-origin",
     "background-position",
+    "background-position-x",
+    "background-position-y",
     "background-repeat",
     "background-size",
     "baseline-shift",
@@ -43059,6 +43688,8 @@ var require_stylus = __commonJS((exports, module) => {
     "border-bottom-width",
     "border-collapse",
     "border-color",
+    "border-end-end-radius",
+    "border-end-start-radius",
     "border-image",
     "border-image-outset",
     "border-image-repeat",
@@ -43083,8 +43714,6 @@ var require_stylus = __commonJS((exports, module) => {
     "border-left-width",
     "border-radius",
     "border-right",
-    "border-end-end-radius",
-    "border-end-start-radius",
     "border-right-color",
     "border-right-style",
     "border-right-width",
@@ -43100,14 +43729,20 @@ var require_stylus = __commonJS((exports, module) => {
     "border-top-width",
     "border-width",
     "bottom",
+    "box-align",
     "box-decoration-break",
+    "box-direction",
+    "box-flex",
+    "box-flex-group",
+    "box-lines",
+    "box-ordinal-group",
+    "box-orient",
+    "box-pack",
     "box-shadow",
     "box-sizing",
     "break-after",
     "break-before",
     "break-inside",
-    "cx",
-    "cy",
     "caption-side",
     "caret-color",
     "clear",
@@ -43131,19 +43766,31 @@ var require_stylus = __commonJS((exports, module) => {
     "column-width",
     "columns",
     "contain",
+    "contain-intrinsic-block-size",
+    "contain-intrinsic-height",
+    "contain-intrinsic-inline-size",
+    "contain-intrinsic-size",
+    "contain-intrinsic-width",
+    "container",
+    "container-name",
+    "container-type",
     "content",
     "content-visibility",
     "counter-increment",
     "counter-reset",
+    "counter-set",
     "cue",
     "cue-after",
     "cue-before",
     "cursor",
+    "cx",
+    "cy",
     "direction",
     "display",
     "dominant-baseline",
     "empty-cells",
     "enable-background",
+    "field-sizing",
     "fill",
     "fill-opacity",
     "fill-rule",
@@ -43156,29 +43803,39 @@ var require_stylus = __commonJS((exports, module) => {
     "flex-shrink",
     "flex-wrap",
     "float",
-    "flow",
     "flood-color",
     "flood-opacity",
+    "flow",
     "font",
     "font-display",
     "font-family",
     "font-feature-settings",
     "font-kerning",
     "font-language-override",
+    "font-optical-sizing",
+    "font-palette",
     "font-size",
     "font-size-adjust",
+    "font-smooth",
     "font-smoothing",
     "font-stretch",
     "font-style",
     "font-synthesis",
+    "font-synthesis-position",
+    "font-synthesis-small-caps",
+    "font-synthesis-style",
+    "font-synthesis-weight",
     "font-variant",
+    "font-variant-alternates",
     "font-variant-caps",
     "font-variant-east-asian",
+    "font-variant-emoji",
     "font-variant-ligatures",
     "font-variant-numeric",
     "font-variant-position",
     "font-variation-settings",
     "font-weight",
+    "forced-color-adjust",
     "gap",
     "glyph-orientation-horizontal",
     "glyph-orientation-vertical",
@@ -43200,14 +43857,19 @@ var require_stylus = __commonJS((exports, module) => {
     "grid-template-rows",
     "hanging-punctuation",
     "height",
+    "hyphenate-character",
+    "hyphenate-limit-chars",
     "hyphens",
     "icon",
     "image-orientation",
     "image-rendering",
     "image-resolution",
     "ime-mode",
+    "initial-letter",
+    "initial-letter-align",
     "inline-size",
     "inset",
+    "inset-area",
     "inset-block",
     "inset-block-end",
     "inset-block-start",
@@ -43215,24 +43877,20 @@ var require_stylus = __commonJS((exports, module) => {
     "inset-inline-end",
     "inset-inline-start",
     "isolation",
-    "kerning",
     "justify-content",
     "justify-items",
     "justify-self",
+    "kerning",
     "left",
     "letter-spacing",
     "lighting-color",
     "line-break",
     "line-height",
+    "line-height-step",
     "list-style",
     "list-style-image",
     "list-style-position",
     "list-style-type",
-    "marker",
-    "marker-end",
-    "marker-mid",
-    "marker-start",
-    "mask",
     "margin",
     "margin-block",
     "margin-block-end",
@@ -43244,6 +43902,11 @@ var require_stylus = __commonJS((exports, module) => {
     "margin-left",
     "margin-right",
     "margin-top",
+    "margin-trim",
+    "marker",
+    "marker-end",
+    "marker-mid",
+    "marker-start",
     "marks",
     "mask",
     "mask-border",
@@ -43262,6 +43925,10 @@ var require_stylus = __commonJS((exports, module) => {
     "mask-repeat",
     "mask-size",
     "mask-type",
+    "masonry-auto-flow",
+    "math-depth",
+    "math-shift",
+    "math-style",
     "max-block-size",
     "max-height",
     "max-inline-size",
@@ -43280,6 +43947,12 @@ var require_stylus = __commonJS((exports, module) => {
     "normal",
     "object-fit",
     "object-position",
+    "offset",
+    "offset-anchor",
+    "offset-distance",
+    "offset-path",
+    "offset-position",
+    "offset-rotate",
     "opacity",
     "order",
     "orphans",
@@ -43289,9 +43962,19 @@ var require_stylus = __commonJS((exports, module) => {
     "outline-style",
     "outline-width",
     "overflow",
+    "overflow-anchor",
+    "overflow-block",
+    "overflow-clip-margin",
+    "overflow-inline",
     "overflow-wrap",
     "overflow-x",
     "overflow-y",
+    "overlay",
+    "overscroll-behavior",
+    "overscroll-behavior-block",
+    "overscroll-behavior-inline",
+    "overscroll-behavior-x",
+    "overscroll-behavior-y",
     "padding",
     "padding-block",
     "padding-block-end",
@@ -43303,16 +43986,24 @@ var require_stylus = __commonJS((exports, module) => {
     "padding-left",
     "padding-right",
     "padding-top",
+    "page",
     "page-break-after",
     "page-break-before",
     "page-break-inside",
+    "paint-order",
     "pause",
     "pause-after",
     "pause-before",
     "perspective",
     "perspective-origin",
+    "place-content",
+    "place-items",
+    "place-self",
     "pointer-events",
     "position",
+    "position-anchor",
+    "position-visibility",
+    "print-color-adjust",
     "quotes",
     "r",
     "resize",
@@ -43322,7 +44013,10 @@ var require_stylus = __commonJS((exports, module) => {
     "right",
     "rotate",
     "row-gap",
+    "ruby-align",
+    "ruby-position",
     "scale",
+    "scroll-behavior",
     "scroll-margin",
     "scroll-margin-block",
     "scroll-margin-block-end",
@@ -43348,6 +44042,9 @@ var require_stylus = __commonJS((exports, module) => {
     "scroll-snap-align",
     "scroll-snap-stop",
     "scroll-snap-type",
+    "scroll-timeline",
+    "scroll-timeline-axis",
+    "scroll-timeline-name",
     "scrollbar-color",
     "scrollbar-gutter",
     "scrollbar-width",
@@ -43355,6 +44052,9 @@ var require_stylus = __commonJS((exports, module) => {
     "shape-margin",
     "shape-outside",
     "shape-rendering",
+    "speak",
+    "speak-as",
+    "src",
     "stop-color",
     "stop-opacity",
     "stroke",
@@ -43365,19 +44065,17 @@ var require_stylus = __commonJS((exports, module) => {
     "stroke-miterlimit",
     "stroke-opacity",
     "stroke-width",
-    "speak",
-    "speak-as",
-    "src",
     "tab-size",
     "table-layout",
-    "text-anchor",
     "text-align",
     "text-align-all",
     "text-align-last",
+    "text-anchor",
     "text-combine-upright",
     "text-decoration",
     "text-decoration-color",
     "text-decoration-line",
+    "text-decoration-skip",
     "text-decoration-skip-ink",
     "text-decoration-style",
     "text-decoration-thickness",
@@ -43391,23 +44089,37 @@ var require_stylus = __commonJS((exports, module) => {
     "text-overflow",
     "text-rendering",
     "text-shadow",
+    "text-size-adjust",
     "text-transform",
     "text-underline-offset",
     "text-underline-position",
+    "text-wrap",
+    "text-wrap-mode",
+    "text-wrap-style",
+    "timeline-scope",
     "top",
+    "touch-action",
     "transform",
     "transform-box",
     "transform-origin",
     "transform-style",
     "transition",
+    "transition-behavior",
     "transition-delay",
     "transition-duration",
     "transition-property",
     "transition-timing-function",
     "translate",
     "unicode-bidi",
+    "user-modify",
+    "user-select",
     "vector-effect",
     "vertical-align",
+    "view-timeline",
+    "view-timeline-axis",
+    "view-timeline-inset",
+    "view-timeline-name",
+    "view-transition-name",
     "visibility",
     "voice-balance",
     "voice-duration",
@@ -43418,6 +44130,7 @@ var require_stylus = __commonJS((exports, module) => {
     "voice-stress",
     "voice-volume",
     "white-space",
+    "white-space-collapse",
     "widows",
     "width",
     "will-change",
@@ -43427,8 +44140,146 @@ var require_stylus = __commonJS((exports, module) => {
     "writing-mode",
     "x",
     "y",
-    "z-index"
+    "z-index",
+    "zoom"
   ].sort().reverse();
+  function stylus(hljs) {
+    const modes = MODES(hljs);
+    const AT_MODIFIERS = "and or not only";
+    const VARIABLE = {
+      className: "variable",
+      begin: "\\$" + hljs.IDENT_RE
+    };
+    const AT_KEYWORDS = [
+      "charset",
+      "css",
+      "debug",
+      "extend",
+      "font-face",
+      "for",
+      "import",
+      "include",
+      "keyframes",
+      "media",
+      "mixin",
+      "page",
+      "warn",
+      "while"
+    ];
+    const LOOKAHEAD_TAG_END = "(?=[.\\s\\n[:,(])";
+    const ILLEGAL = [
+      "\\?",
+      "(\\bReturn\\b)",
+      "(\\bEnd\\b)",
+      "(\\bend\\b)",
+      "(\\bdef\\b)",
+      ";",
+      "#\\s",
+      "\\*\\s",
+      "===\\s",
+      "\\|",
+      "%"
+    ];
+    return {
+      name: "Stylus",
+      aliases: ["styl"],
+      case_insensitive: false,
+      keywords: "if else for in",
+      illegal: "(" + ILLEGAL.join("|") + ")",
+      contains: [
+        hljs.QUOTE_STRING_MODE,
+        hljs.APOS_STRING_MODE,
+        hljs.C_LINE_COMMENT_MODE,
+        hljs.C_BLOCK_COMMENT_MODE,
+        modes.HEXCOLOR,
+        {
+          begin: "\\.[a-zA-Z][a-zA-Z0-9_-]*" + LOOKAHEAD_TAG_END,
+          className: "selector-class"
+        },
+        {
+          begin: "#[a-zA-Z][a-zA-Z0-9_-]*" + LOOKAHEAD_TAG_END,
+          className: "selector-id"
+        },
+        {
+          begin: "\\b(" + TAGS.join("|") + ")" + LOOKAHEAD_TAG_END,
+          className: "selector-tag"
+        },
+        {
+          className: "selector-pseudo",
+          begin: "&?:(" + PSEUDO_CLASSES.join("|") + ")" + LOOKAHEAD_TAG_END
+        },
+        {
+          className: "selector-pseudo",
+          begin: "&?:(:)?(" + PSEUDO_ELEMENTS.join("|") + ")" + LOOKAHEAD_TAG_END
+        },
+        modes.ATTRIBUTE_SELECTOR_MODE,
+        {
+          className: "keyword",
+          begin: /@media/,
+          starts: {
+            end: /[{;}]/,
+            keywords: {
+              $pattern: /[a-z-]+/,
+              keyword: AT_MODIFIERS,
+              attribute: MEDIA_FEATURES.join(" ")
+            },
+            contains: [modes.CSS_NUMBER_MODE]
+          }
+        },
+        {
+          className: "keyword",
+          begin: "@((-(o|moz|ms|webkit)-)?(" + AT_KEYWORDS.join("|") + "))\\b"
+        },
+        VARIABLE,
+        modes.CSS_NUMBER_MODE,
+        {
+          className: "function",
+          begin: "^[a-zA-Z][a-zA-Z0-9_-]*\\(.*\\)",
+          illegal: "[\\n]",
+          returnBegin: true,
+          contains: [
+            {
+              className: "title",
+              begin: "\\b[a-zA-Z][a-zA-Z0-9_-]*"
+            },
+            {
+              className: "params",
+              begin: /\(/,
+              end: /\)/,
+              contains: [
+                modes.HEXCOLOR,
+                VARIABLE,
+                hljs.APOS_STRING_MODE,
+                modes.CSS_NUMBER_MODE,
+                hljs.QUOTE_STRING_MODE
+              ]
+            }
+          ]
+        },
+        modes.CSS_VARIABLE,
+        {
+          className: "attribute",
+          begin: "\\b(" + ATTRIBUTES.join("|") + ")\\b",
+          starts: {
+            end: /;|$/,
+            contains: [
+              modes.HEXCOLOR,
+              VARIABLE,
+              hljs.APOS_STRING_MODE,
+              hljs.QUOTE_STRING_MODE,
+              modes.CSS_NUMBER_MODE,
+              hljs.C_BLOCK_COMMENT_MODE,
+              modes.IMPORTANT,
+              modes.FUNCTION_DISPATCH
+            ],
+            illegal: /\./,
+            relevance: 0
+          }
+        },
+        modes.FUNCTION_DISPATCH
+      ]
+    };
+  }
   module.exports = stylus;
 });
 
@@ -43437,8 +44288,10 @@ var require_subunit = __commonJS((exports, module) => {
   function subunit(hljs) {
     const DETAILS = {
       className: "string",
-      begin: "\\[\n(multipart)?",
-      end: "\\]\n"
+      begin: `\\[
+(multipart)?`,
+      end: `\\]
+`
     };
     const TIME = {
       className: "string",
@@ -43501,466 +44354,6 @@ var require_swift = __commonJS((exports, module) => {
     const opts = stripOptionsFromArgs(args);
     const joined = "(" + (opts.capture ? "" : "?:") + args.map((x) => source(x)).join("|") + ")";
     return joined;
-  }
-  function swift(hljs) {
-    const WHITESPACE = {
-      match: /\s+/,
-      relevance: 0
-    };
-    const BLOCK_COMMENT = hljs.COMMENT("/\\*", "\\*/", { contains: ["self"] });
-    const COMMENTS = [
-      hljs.C_LINE_COMMENT_MODE,
-      BLOCK_COMMENT
-    ];
-    const DOT_KEYWORD = {
-      match: [
-        /\./,
-        either(...dotKeywords, ...optionalDotKeywords)
-      ],
-      className: { 2: "keyword" }
-    };
-    const KEYWORD_GUARD = {
-      match: concat(/\./, either(...keywords)),
-      relevance: 0
-    };
-    const PLAIN_KEYWORDS = keywords.filter((kw) => typeof kw === "string").concat(["_|0"]);
-    const REGEX_KEYWORDS = keywords.filter((kw) => typeof kw !== "string").concat(keywordTypes).map(keywordWrapper);
-    const KEYWORD = { variants: [
-      {
-        className: "keyword",
-        match: either(...REGEX_KEYWORDS, ...optionalDotKeywords)
-      }
-    ] };
-    const KEYWORDS = {
-      $pattern: either(/\b\w+/, /#\w+/),
-      keyword: PLAIN_KEYWORDS.concat(numberSignKeywords),
-      literal: literals
-    };
-    const KEYWORD_MODES = [
-      DOT_KEYWORD,
-      KEYWORD_GUARD,
-      KEYWORD
-    ];
-    const BUILT_IN_GUARD = {
-      match: concat(/\./, either(...builtIns)),
-      relevance: 0
-    };
-    const BUILT_IN = {
-      className: "built_in",
-      match: concat(/\b/, either(...builtIns), /(?=\()/)
-    };
-    const BUILT_INS = [
-      BUILT_IN_GUARD,
-      BUILT_IN
-    ];
-    const OPERATOR_GUARD = {
-      match: /->/,
-      relevance: 0
-    };
-    const OPERATOR = {
-      className: "operator",
-      relevance: 0,
-      variants: [
-        { match: operator },
-        {
-          match: `\\.(\\.|${operatorCharacter})+`
-        }
-      ]
-    };
-    const OPERATORS = [
-      OPERATOR_GUARD,
-      OPERATOR
-    ];
-    const decimalDigits = "([0-9]_*)+";
-    const hexDigits = "([0-9a-fA-F]_*)+";
-    const NUMBER = {
-      className: "number",
-      relevance: 0,
-      variants: [
-        { match: `\\b(${decimalDigits})(\\.(${decimalDigits}))?` + `([eE][+-]?(${decimalDigits}))?\\b` },
-        { match: `\\b0x(${hexDigits})(\\.(${hexDigits}))?` + `([pP][+-]?(${decimalDigits}))?\\b` },
-        { match: /\b0o([0-7]_*)+\b/ },
-        { match: /\b0b([01]_*)+\b/ }
-      ]
-    };
-    const ESCAPED_CHARACTER = (rawDelimiter = "") => ({
-      className: "subst",
-      variants: [
-        { match: concat(/\\/, rawDelimiter, /[0\\tnr"']/) },
-        { match: concat(/\\/, rawDelimiter, /u\{[0-9a-fA-F]{1,8}\}/) }
-      ]
-    });
-    const ESCAPED_NEWLINE = (rawDelimiter = "") => ({
-      className: "subst",
-      match: concat(/\\/, rawDelimiter, /[\t ]*(?:[\r\n]|\r\n)/)
-    });
-    const INTERPOLATION = (rawDelimiter = "") => ({
-      className: "subst",
-      label: "interpol",
-      begin: concat(/\\/, rawDelimiter, /\(/),
-      end: /\)/
-    });
-    const MULTILINE_STRING = (rawDelimiter = "") => ({
-      begin: concat(rawDelimiter, /"""/),
-      end: concat(/"""/, rawDelimiter),
-      contains: [
-        ESCAPED_CHARACTER(rawDelimiter),
-        ESCAPED_NEWLINE(rawDelimiter),
-        INTERPOLATION(rawDelimiter)
-      ]
-    });
-    const SINGLE_LINE_STRING = (rawDelimiter = "") => ({
-      begin: concat(rawDelimiter, /"/),
-      end: concat(/"/, rawDelimiter),
-      contains: [
-        ESCAPED_CHARACTER(rawDelimiter),
-        INTERPOLATION(rawDelimiter)
-      ]
-    });
-    const STRING = {
-      className: "string",
-      variants: [
-        MULTILINE_STRING(),
-        MULTILINE_STRING("#"),
-        MULTILINE_STRING("##"),
-        MULTILINE_STRING("###"),
-        SINGLE_LINE_STRING(),
-        SINGLE_LINE_STRING("#"),
-        SINGLE_LINE_STRING("##"),
-        SINGLE_LINE_STRING("###")
-      ]
-    };
-    const REGEXP_CONTENTS = [
-      hljs.BACKSLASH_ESCAPE,
-      {
-        begin: /\[/,
-        end: /\]/,
-        relevance: 0,
-        contains: [hljs.BACKSLASH_ESCAPE]
-      }
-    ];
-    const BARE_REGEXP_LITERAL = {
-      begin: /\/[^\s](?=[^/\n]*\/)/,
-      end: /\//,
-      contains: REGEXP_CONTENTS
-    };
-    const EXTENDED_REGEXP_LITERAL = (rawDelimiter) => {
-      const begin = concat(rawDelimiter, /\//);
-      const end = concat(/\//, rawDelimiter);
-      return {
-        begin,
-        end,
-        contains: [
-          ...REGEXP_CONTENTS,
-          {
-            scope: "comment",
-            begin: `#(?!.*${end})`,
-            end: /$/
-          }
-        ]
-      };
-    };
-    const REGEXP = {
-      scope: "regexp",
-      variants: [
-        EXTENDED_REGEXP_LITERAL("###"),
-        EXTENDED_REGEXP_LITERAL("##"),
-        EXTENDED_REGEXP_LITERAL("#"),
-        BARE_REGEXP_LITERAL
-      ]
-    };
-    const QUOTED_IDENTIFIER = { match: concat(/`/, identifier, /`/) };
-    const IMPLICIT_PARAMETER = {
-      className: "variable",
-      match: /\$\d+/
-    };
-    const PROPERTY_WRAPPER_PROJECTION = {
-      className: "variable",
-      match: `\\\$${identifierCharacter}+`
-    };
-    const IDENTIFIERS = [
-      QUOTED_IDENTIFIER,
-      IMPLICIT_PARAMETER,
-      PROPERTY_WRAPPER_PROJECTION
-    ];
-    const AVAILABLE_ATTRIBUTE = {
-      match: /(@|#(un)?)available/,
-      scope: "keyword",
-      starts: { contains: [
-        {
-          begin: /\(/,
-          end: /\)/,
-          keywords: availabilityKeywords,
-          contains: [
-            ...OPERATORS,
-            NUMBER,
-            STRING
-          ]
-        }
-      ] }
-    };
-    const KEYWORD_ATTRIBUTE = {
-      scope: "keyword",
-      match: concat(/@/, either(...keywordAttributes), lookahead(either(/\(/, /\s+/)))
-    };
-    const USER_DEFINED_ATTRIBUTE = {
-      scope: "meta",
-      match: concat(/@/, identifier)
-    };
-    const ATTRIBUTES = [
-      AVAILABLE_ATTRIBUTE,
-      KEYWORD_ATTRIBUTE,
-      USER_DEFINED_ATTRIBUTE
-    ];
-    const TYPE = {
-      match: lookahead(/\b[A-Z]/),
-      relevance: 0,
-      contains: [
-        {
-          className: "type",
-          match: concat(/(AV|CA|CF|CG|CI|CL|CM|CN|CT|MK|MP|MTK|MTL|NS|SCN|SK|UI|WK|XC)/, identifierCharacter, "+")
-        },
-        {
-          className: "type",
-          match: typeIdentifier,
-          relevance: 0
-        },
-        {
-          match: /[?!]+/,
-          relevance: 0
-        },
-        {
-          match: /\.\.\./,
-          relevance: 0
-        },
-        {
-          match: concat(/\s+&\s+/, lookahead(typeIdentifier)),
-          relevance: 0
-        }
-      ]
-    };
-    const GENERIC_ARGUMENTS = {
-      begin: /</,
-      end: />/,
-      keywords: KEYWORDS,
-      contains: [
-        ...COMMENTS,
-        ...KEYWORD_MODES,
-        ...ATTRIBUTES,
-        OPERATOR_GUARD,
-        TYPE
-      ]
-    };
-    TYPE.contains.push(GENERIC_ARGUMENTS);
-    const TUPLE_ELEMENT_NAME = {
-      match: concat(identifier, /\s*:/),
-      keywords: "_|0",
-      relevance: 0
-    };
-    const TUPLE = {
-      begin: /\(/,
-      end: /\)/,
-      relevance: 0,
-      keywords: KEYWORDS,
-      contains: [
-        "self",
-        TUPLE_ELEMENT_NAME,
-        ...COMMENTS,
-        REGEXP,
-        ...KEYWORD_MODES,
-        ...BUILT_INS,
-        ...OPERATORS,
-        NUMBER,
-        STRING,
-        ...IDENTIFIERS,
-        ...ATTRIBUTES,
-        TYPE
-      ]
-    };
-    const GENERIC_PARAMETERS = {
-      begin: /</,
-      end: />/,
-      keywords: "repeat each",
-      contains: [
-        ...COMMENTS,
-        TYPE
-      ]
-    };
-    const FUNCTION_PARAMETER_NAME = {
-      begin: either(lookahead(concat(identifier, /\s*:/)), lookahead(concat(identifier, /\s+/, identifier, /\s*:/))),
-      end: /:/,
-      relevance: 0,
-      contains: [
-        {
-          className: "keyword",
-          match: /\b_\b/
-        },
-        {
-          className: "params",
-          match: identifier
-        }
-      ]
-    };
-    const FUNCTION_PARAMETERS = {
-      begin: /\(/,
-      end: /\)/,
-      keywords: KEYWORDS,
-      contains: [
-        FUNCTION_PARAMETER_NAME,
-        ...COMMENTS,
-        ...KEYWORD_MODES,
-        ...OPERATORS,
-        NUMBER,
-        STRING,
-        ...ATTRIBUTES,
-        TYPE,
-        TUPLE
-      ],
-      endsParent: true,
-      illegal: /["']/
-    };
-    const FUNCTION_OR_MACRO = {
-      match: [
-        /(func|macro)/,
-        /\s+/,
-        either(QUOTED_IDENTIFIER.match, identifier, operator)
-      ],
-      className: {
-        1: "keyword",
-        3: "title.function"
-      },
-      contains: [
-        GENERIC_PARAMETERS,
-        FUNCTION_PARAMETERS,
-        WHITESPACE
-      ],
-      illegal: [
-        /\[/,
-        /%/
-      ]
-    };
-    const INIT_SUBSCRIPT = {
-      match: [
-        /\b(?:subscript|init[?!]?)/,
-        /\s*(?=[<(])/
-      ],
-      className: { 1: "keyword" },
-      contains: [
-        GENERIC_PARAMETERS,
-        FUNCTION_PARAMETERS,
-        WHITESPACE
-      ],
-      illegal: /\[|%/
-    };
-    const OPERATOR_DECLARATION = {
-      match: [
-        /operator/,
-        /\s+/,
-        operator
-      ],
-      className: {
-        1: "keyword",
-        3: "title"
-      }
-    };
-    const PRECEDENCEGROUP = {
-      begin: [
-        /precedencegroup/,
-        /\s+/,
-        typeIdentifier
-      ],
-      className: {
-        1: "keyword",
-        3: "title"
-      },
-      contains: [TYPE],
-      keywords: [
-        ...precedencegroupKeywords,
-        ...literals
-      ],
-      end: /}/
-    };
-    const TYPE_DECLARATION = {
-      begin: [
-        /(struct|protocol|class|extension|enum|actor)/,
-        /\s+/,
-        identifier,
-        /\s*/
-      ],
-      beginScope: {
-        1: "keyword",
-        3: "title.class"
-      },
-      keywords: KEYWORDS,
-      contains: [
-        GENERIC_PARAMETERS,
-        ...KEYWORD_MODES,
-        {
-          begin: /:/,
-          end: /\{/,
-          keywords: KEYWORDS,
-          contains: [
-            {
-              scope: "title.class.inherited",
-              match: typeIdentifier
-            },
-            ...KEYWORD_MODES
-          ],
-          relevance: 0
-        }
-      ]
-    };
-    for (const variant of STRING.variants) {
-      const interpolation = variant.contains.find((mode) => mode.label === "interpol");
-      interpolation.keywords = KEYWORDS;
-      const submodes = [
-        ...KEYWORD_MODES,
-        ...BUILT_INS,
-        ...OPERATORS,
-        NUMBER,
-        STRING,
-        ...IDENTIFIERS
-      ];
-      interpolation.contains = [
-        ...submodes,
-        {
-          begin: /\(/,
-          end: /\)/,
-          contains: [
-            "self",
-            ...submodes
-          ]
-        }
-      ];
-    }
-    return {
-      name: "Swift",
-      keywords: KEYWORDS,
-      contains: [
-        ...COMMENTS,
-        FUNCTION_OR_MACRO,
-        INIT_SUBSCRIPT,
-        TYPE_DECLARATION,
-        OPERATOR_DECLARATION,
-        PRECEDENCEGROUP,
-        {
-          beginKeywords: "import",
-          end: /$/,
-          contains: [...COMMENTS],
-          relevance: 0
-        },
-        REGEXP,
-        ...KEYWORD_MODES,
-        ...BUILT_INS,
-        ...OPERATORS,
-        NUMBER,
-        STRING,
-        ...IDENTIFIERS,
-        ...ATTRIBUTES,
-        TYPE,
-        TUPLE
-      ]
-    };
   }
   var keywordWrapper = (keyword) => concat(/\b/, keyword, /\w$/.test(keyword) ? /\b/ : /\B/);
   var dotKeywords = [
@@ -44198,6 +44591,493 @@ var require_swift = __commonJS((exports, module) => {
     "tvOSApplicationExtension",
     "swift"
   ];
+  function swift(hljs) {
+    const WHITESPACE = {
+      match: /\s+/,
+      relevance: 0
+    };
+    const BLOCK_COMMENT = hljs.COMMENT("/\\*", "\\*/", { contains: ["self"] });
+    const COMMENTS = [
+      hljs.C_LINE_COMMENT_MODE,
+      BLOCK_COMMENT
+    ];
+    const DOT_KEYWORD = {
+      match: [
+        /\./,
+        either(...dotKeywords, ...optionalDotKeywords)
+      ],
+      className: { 2: "keyword" }
+    };
+    const KEYWORD_GUARD = {
+      match: concat(/\./, either(...keywords)),
+      relevance: 0
+    };
+    const PLAIN_KEYWORDS = keywords.filter((kw) => typeof kw === "string").concat(["_|0"]);
+    const REGEX_KEYWORDS = keywords.filter((kw) => typeof kw !== "string").concat(keywordTypes).map(keywordWrapper);
+    const KEYWORD = { variants: [
+      {
+        className: "keyword",
+        match: either(...REGEX_KEYWORDS, ...optionalDotKeywords)
+      }
+    ] };
+    const KEYWORDS = {
+      $pattern: either(/\b\w+/, /#\w+/),
+      keyword: PLAIN_KEYWORDS.concat(numberSignKeywords),
+      literal: literals
+    };
+    const KEYWORD_MODES = [
+      DOT_KEYWORD,
+      KEYWORD_GUARD,
+      KEYWORD
+    ];
+    const BUILT_IN_GUARD = {
+      match: concat(/\./, either(...builtIns)),
+      relevance: 0
+    };
+    const BUILT_IN = {
+      className: "built_in",
+      match: concat(/\b/, either(...builtIns), /(?=\()/)
+    };
+    const BUILT_INS = [
+      BUILT_IN_GUARD,
+      BUILT_IN
+    ];
+    const OPERATOR_GUARD = {
+      match: /->/,
+      relevance: 0
+    };
+    const OPERATOR = {
+      className: "operator",
+      relevance: 0,
+      variants: [
+        { match: operator },
+        {
+          match: `\\.(\\.|${operatorCharacter})+`
+        }
+      ]
+    };
+    const OPERATORS = [
+      OPERATOR_GUARD,
+      OPERATOR
+    ];
+    const decimalDigits = "([0-9]_*)+";
+    const hexDigits = "([0-9a-fA-F]_*)+";
+    const NUMBER = {
+      className: "number",
+      relevance: 0,
+      variants: [
+        { match: `\\b(${decimalDigits})(\\.(${decimalDigits}))?` + `([eE][+-]?(${decimalDigits}))?\\b` },
+        { match: `\\b0x(${hexDigits})(\\.(${hexDigits}))?` + `([pP][+-]?(${decimalDigits}))?\\b` },
+        { match: /\b0o([0-7]_*)+\b/ },
+        { match: /\b0b([01]_*)+\b/ }
+      ]
+    };
+    const ESCAPED_CHARACTER = (rawDelimiter = "") => ({
+      className: "subst",
+      variants: [
+        { match: concat(/\\/, rawDelimiter, /[0\\tnr"']/) },
+        { match: concat(/\\/, rawDelimiter, /u\{[0-9a-fA-F]{1,8}\}/) }
+      ]
+    });
+    const ESCAPED_NEWLINE = (rawDelimiter = "") => ({
+      className: "subst",
+      match: concat(/\\/, rawDelimiter, /[\t ]*(?:[\r\n]|\r\n)/)
+    });
+    const INTERPOLATION = (rawDelimiter = "") => ({
+      className: "subst",
+      label: "interpol",
+      begin: concat(/\\/, rawDelimiter, /\(/),
+      end: /\)/
+    });
+    const MULTILINE_STRING = (rawDelimiter = "") => ({
+      begin: concat(rawDelimiter, /"""/),
+      end: concat(/"""/, rawDelimiter),
+      contains: [
+        ESCAPED_CHARACTER(rawDelimiter),
+        ESCAPED_NEWLINE(rawDelimiter),
+        INTERPOLATION(rawDelimiter)
+      ]
+    });
+    const SINGLE_LINE_STRING = (rawDelimiter = "") => ({
+      begin: concat(rawDelimiter, /"/),
+      end: concat(/"/, rawDelimiter),
+      contains: [
+        ESCAPED_CHARACTER(rawDelimiter),
+        INTERPOLATION(rawDelimiter)
+      ]
+    });
+    const STRING = {
+      className: "string",
+      variants: [
+        MULTILINE_STRING(),
+        MULTILINE_STRING("#"),
+        MULTILINE_STRING("##"),
+        MULTILINE_STRING("###"),
+        SINGLE_LINE_STRING(),
+        SINGLE_LINE_STRING("#"),
+        SINGLE_LINE_STRING("##"),
+        SINGLE_LINE_STRING("###")
+      ]
+    };
+    const REGEXP_CONTENTS = [
+      hljs.BACKSLASH_ESCAPE,
+      {
+        begin: /\[/,
+        end: /\]/,
+        relevance: 0,
+        contains: [hljs.BACKSLASH_ESCAPE]
+      }
+    ];
+    const BARE_REGEXP_LITERAL = {
+      begin: /\/[^\s](?=[^/\n]*\/)/,
+      end: /\//,
+      contains: REGEXP_CONTENTS
+    };
+    const EXTENDED_REGEXP_LITERAL = (rawDelimiter) => {
+      const begin = concat(rawDelimiter, /\//);
+      const end = concat(/\//, rawDelimiter);
+      return {
+        begin,
+        end,
+        contains: [
+          ...REGEXP_CONTENTS,
+          {
+            scope: "comment",
+            begin: `#(?!.*${end})`,
+            end: /$/
+          }
+        ]
+      };
+    };
+    const REGEXP = {
+      scope: "regexp",
+      variants: [
+        EXTENDED_REGEXP_LITERAL("###"),
+        EXTENDED_REGEXP_LITERAL("##"),
+        EXTENDED_REGEXP_LITERAL("#"),
+        BARE_REGEXP_LITERAL
+      ]
+    };
+    const QUOTED_IDENTIFIER = { match: concat(/`/, identifier, /`/) };
+    const IMPLICIT_PARAMETER = {
+      className: "variable",
+      match: /\$\d+/
+    };
+    const PROPERTY_WRAPPER_PROJECTION = {
+      className: "variable",
+      match: `\\$${identifierCharacter}+`
+    };
+    const IDENTIFIERS = [
+      QUOTED_IDENTIFIER,
+      IMPLICIT_PARAMETER,
+      PROPERTY_WRAPPER_PROJECTION
+    ];
+    const AVAILABLE_ATTRIBUTE = {
+      match: /(@|#(un)?)available/,
+      scope: "keyword",
+      starts: { contains: [
+        {
+          begin: /\(/,
+          end: /\)/,
+          keywords: availabilityKeywords,
+          contains: [
+            ...OPERATORS,
+            NUMBER,
+            STRING
+          ]
+        }
+      ] }
+    };
+    const KEYWORD_ATTRIBUTE = {
+      scope: "keyword",
+      match: concat(/@/, either(...keywordAttributes), lookahead(either(/\(/, /\s+/)))
+    };
+    const USER_DEFINED_ATTRIBUTE = {
+      scope: "meta",
+      match: concat(/@/, identifier)
+    };
+    const ATTRIBUTES = [
+      AVAILABLE_ATTRIBUTE,
+      KEYWORD_ATTRIBUTE,
+      USER_DEFINED_ATTRIBUTE
+    ];
+    const TYPE = {
+      match: lookahead(/\b[A-Z]/),
+      relevance: 0,
+      contains: [
+        {
+          className: "type",
+          match: concat(/(AV|CA|CF|CG|CI|CL|CM|CN|CT|MK|MP|MTK|MTL|NS|SCN|SK|UI|WK|XC)/, identifierCharacter, "+")
+        },
+        {
+          className: "type",
+          match: typeIdentifier,
+          relevance: 0
+        },
+        {
+          match: /[?!]+/,
+          relevance: 0
+        },
+        {
+          match: /\.\.\./,
+          relevance: 0
+        },
+        {
+          match: concat(/\s+&\s+/, lookahead(typeIdentifier)),
+          relevance: 0
+        }
+      ]
+    };
+    const GENERIC_ARGUMENTS = {
+      begin: /</,
+      end: />/,
+      keywords: KEYWORDS,
+      contains: [
+        ...COMMENTS,
+        ...KEYWORD_MODES,
+        ...ATTRIBUTES,
+        OPERATOR_GUARD,
+        TYPE
+      ]
+    };
+    TYPE.contains.push(GENERIC_ARGUMENTS);
+    const TUPLE_ELEMENT_NAME = {
+      match: concat(identifier, /\s*:/),
+      keywords: "_|0",
+      relevance: 0
+    };
+    const TUPLE = {
+      begin: /\(/,
+      end: /\)/,
+      relevance: 0,
+      keywords: KEYWORDS,
+      contains: [
+        "self",
+        TUPLE_ELEMENT_NAME,
+        ...COMMENTS,
+        REGEXP,
+        ...KEYWORD_MODES,
+        ...BUILT_INS,
+        ...OPERATORS,
+        NUMBER,
+        STRING,
+        ...IDENTIFIERS,
+        ...ATTRIBUTES,
+        TYPE
+      ]
+    };
+    const GENERIC_PARAMETERS = {
+      begin: /</,
+      end: />/,
+      keywords: "repeat each",
+      contains: [
+        ...COMMENTS,
+        TYPE
+      ]
+    };
+    const FUNCTION_PARAMETER_NAME = {
+      begin: either(lookahead(concat(identifier, /\s*:/)), lookahead(concat(identifier, /\s+/, identifier, /\s*:/))),
+      end: /:/,
+      relevance: 0,
+      contains: [
+        {
+          className: "keyword",
+          match: /\b_\b/
+        },
+        {
+          className: "params",
+          match: identifier
+        }
+      ]
+    };
+    const FUNCTION_PARAMETERS = {
+      begin: /\(/,
+      end: /\)/,
+      keywords: KEYWORDS,
+      contains: [
+        FUNCTION_PARAMETER_NAME,
+        ...COMMENTS,
+        ...KEYWORD_MODES,
+        ...OPERATORS,
+        NUMBER,
+        STRING,
+        ...ATTRIBUTES,
+        TYPE,
+        TUPLE
+      ],
+      endsParent: true,
+      illegal: /["']/
+    };
+    const FUNCTION_OR_MACRO = {
+      match: [
+        /(func|macro)/,
+        /\s+/,
+        either(QUOTED_IDENTIFIER.match, identifier, operator)
+      ],
+      className: {
+        1: "keyword",
+        3: "title.function"
+      },
+      contains: [
+        GENERIC_PARAMETERS,
+        FUNCTION_PARAMETERS,
+        WHITESPACE
+      ],
+      illegal: [
+        /\[/,
+        /%/
+      ]
+    };
+    const INIT_SUBSCRIPT = {
+      match: [
+        /\b(?:subscript|init[?!]?)/,
+        /\s*(?=[<(])/
+      ],
+      className: { 1: "keyword" },
+      contains: [
+        GENERIC_PARAMETERS,
+        FUNCTION_PARAMETERS,
+        WHITESPACE
+      ],
+      illegal: /\[|%/
+    };
+    const OPERATOR_DECLARATION = {
+      match: [
+        /operator/,
+        /\s+/,
+        operator
+      ],
+      className: {
+        1: "keyword",
+        3: "title"
+      }
+    };
+    const PRECEDENCEGROUP = {
+      begin: [
+        /precedencegroup/,
+        /\s+/,
+        typeIdentifier
+      ],
+      className: {
+        1: "keyword",
+        3: "title"
+      },
+      contains: [TYPE],
+      keywords: [
+        ...precedencegroupKeywords,
+        ...literals
+      ],
+      end: /}/
+    };
+    const CLASS_FUNC_DECLARATION = {
+      match: [
+        /class\b/,
+        /\s+/,
+        /func\b/,
+        /\s+/,
+        /\b[A-Za-z_][A-Za-z0-9_]*\b/
+      ],
+      scope: {
+        1: "keyword",
+        3: "keyword",
+        5: "title.function"
+      }
+    };
+    const CLASS_VAR_DECLARATION = {
+      match: [
+        /class\b/,
+        /\s+/,
+        /var\b/
+      ],
+      scope: {
+        1: "keyword",
+        3: "keyword"
+      }
+    };
+    const TYPE_DECLARATION = {
+      begin: [
+        /(struct|protocol|class|extension|enum|actor)/,
+        /\s+/,
+        identifier,
+        /\s*/
+      ],
+      beginScope: {
+        1: "keyword",
+        3: "title.class"
+      },
+      keywords: KEYWORDS,
+      contains: [
+        GENERIC_PARAMETERS,
+        ...KEYWORD_MODES,
+        {
+          begin: /:/,
+          end: /\{/,
+          keywords: KEYWORDS,
+          contains: [
+            {
+              scope: "title.class.inherited",
+              match: typeIdentifier
+            },
+            ...KEYWORD_MODES
+          ],
+          relevance: 0
+        }
+      ]
+    };
+    for (const variant of STRING.variants) {
+      const interpolation = variant.contains.find((mode) => mode.label === "interpol");
+      interpolation.keywords = KEYWORDS;
+      const submodes = [
+        ...KEYWORD_MODES,
+        ...BUILT_INS,
+        ...OPERATORS,
+        NUMBER,
+        STRING,
+        ...IDENTIFIERS
+      ];
+      interpolation.contains = [
+        ...submodes,
+        {
+          begin: /\(/,
+          end: /\)/,
+          contains: [
+            "self",
+            ...submodes
+          ]
+        }
+      ];
+    }
+    return {
+      name: "Swift",
+      keywords: KEYWORDS,
+      contains: [
+        ...COMMENTS,
+        FUNCTION_OR_MACRO,
+        INIT_SUBSCRIPT,
+        CLASS_FUNC_DECLARATION,
+        CLASS_VAR_DECLARATION,
+        TYPE_DECLARATION,
+        OPERATOR_DECLARATION,
+        PRECEDENCEGROUP,
+        {
+          beginKeywords: "import",
+          end: /$/,
+          contains: [...COMMENTS],
+          relevance: 0
+        },
+        REGEXP,
+        ...KEYWORD_MODES,
+        ...BUILT_INS,
+        ...OPERATORS,
+        NUMBER,
+        STRING,
+        ...IDENTIFIERS,
+        ...ATTRIBUTES,
+        TYPE,
+        TUPLE
+      ]
+    };
+  }
   module.exports = swift;
 });
 
@@ -44255,16 +45135,16 @@ var require_taggerscript = __commonJS((exports, module) => {
 var require_yaml = __commonJS((exports, module) => {
   function yaml(hljs) {
     const LITERALS = "true false yes no null";
-    const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*\'()[\\]]+";
+    const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
     const KEY = {
       className: "attr",
       variants: [
-        { begin: /\w[\w :()\./-]*:(?=[ \t]|$)/ },
+        { begin: /[\w*@][\w*@ :()\./-]*:(?=[ \t]|$)/ },
         {
-          begin: /"\w[\w :()\./-]*":(?=[ \t]|$)/
+          begin: /"[\w*@][\w*@ :()\./-]*":(?=[ \t]|$)/
         },
         {
-          begin: /'\w[\w :()\./-]*':(?=[ \t]|$)/
+          begin: /'[\w*@][\w*@ :()\./-]*':(?=[ \t]|$)/
         }
       ]
     };
@@ -44281,14 +45161,23 @@ var require_yaml = __commonJS((exports, module) => {
         }
       ]
     };
+    const SINGLE_QUOTE_STRING = {
+      className: "string",
+      relevance: 0,
+      begin: /'/,
+      end: /'/,
+      contains: [
+        {
+          match: /''/,
+          scope: "char.escape",
+          relevance: 0
+        }
+      ]
+    };
     const STRING = {
       className: "string",
       relevance: 0,
       variants: [
-        {
-          begin: /'/,
-          end: /'/
-        },
         {
           begin: /"/,
           end: /"/
@@ -44303,7 +45192,13 @@ var require_yaml = __commonJS((exports, module) => {
     const CONTAINER_STRING = hljs.inherit(STRING, { variants: [
       {
         begin: /'/,
-        end: /'/
+        end: /'/,
+        contains: [
+          {
+            begin: /''/,
+            relevance: 0
+          }
+        ]
       },
       {
         begin: /"/,
@@ -44401,6 +45296,7 @@ var require_yaml = __commonJS((exports, module) => {
       },
       OBJECT,
       ARRAY,
+      SINGLE_QUOTE_STRING,
       STRING
     ];
     const VALUE_MODES = [...MODES];
@@ -44850,8 +45746,8 @@ var require_tp = __commonJS((exports, module) => {
         hljs.QUOTE_STRING_MODE,
         {
           className: "string",
-          begin: "\'",
-          end: "\'"
+          begin: "'",
+          end: "'"
         },
         hljs.C_NUMBER_MODE,
         {
@@ -45108,6 +46004,139 @@ var require_twig = __commonJS((exports, module) => {
 
 // node_modules/highlight.js/lib/languages/typescript.js
 var require_typescript = __commonJS((exports, module) => {
+  var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
+  var KEYWORDS = [
+    "as",
+    "in",
+    "of",
+    "if",
+    "for",
+    "while",
+    "finally",
+    "var",
+    "new",
+    "function",
+    "do",
+    "return",
+    "void",
+    "else",
+    "break",
+    "catch",
+    "instanceof",
+    "with",
+    "throw",
+    "case",
+    "default",
+    "try",
+    "switch",
+    "continue",
+    "typeof",
+    "delete",
+    "let",
+    "yield",
+    "const",
+    "class",
+    "debugger",
+    "async",
+    "await",
+    "static",
+    "import",
+    "from",
+    "export",
+    "extends",
+    "using"
+  ];
+  var LITERALS = [
+    "true",
+    "false",
+    "null",
+    "undefined",
+    "NaN",
+    "Infinity"
+  ];
+  var TYPES = [
+    "Object",
+    "Function",
+    "Boolean",
+    "Symbol",
+    "Math",
+    "Date",
+    "Number",
+    "BigInt",
+    "String",
+    "RegExp",
+    "Array",
+    "Float32Array",
+    "Float64Array",
+    "Int8Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int16Array",
+    "Int32Array",
+    "Uint16Array",
+    "Uint32Array",
+    "BigInt64Array",
+    "BigUint64Array",
+    "Set",
+    "Map",
+    "WeakSet",
+    "WeakMap",
+    "ArrayBuffer",
+    "SharedArrayBuffer",
+    "Atomics",
+    "DataView",
+    "JSON",
+    "Promise",
+    "Generator",
+    "GeneratorFunction",
+    "AsyncFunction",
+    "Reflect",
+    "Proxy",
+    "Intl",
+    "WebAssembly"
+  ];
+  var ERROR_TYPES = [
+    "Error",
+    "EvalError",
+    "InternalError",
+    "RangeError",
+    "ReferenceError",
+    "SyntaxError",
+    "TypeError",
+    "URIError"
+  ];
+  var BUILT_IN_GLOBALS = [
+    "setInterval",
+    "setTimeout",
+    "clearInterval",
+    "clearTimeout",
+    "require",
+    "exports",
+    "eval",
+    "isFinite",
+    "isNaN",
+    "parseFloat",
+    "parseInt",
+    "decodeURI",
+    "decodeURIComponent",
+    "encodeURI",
+    "encodeURIComponent",
+    "escape",
+    "unescape"
+  ];
+  var BUILT_IN_VARIABLES = [
+    "arguments",
+    "this",
+    "super",
+    "console",
+    "window",
+    "document",
+    "localStorage",
+    "sessionStorage",
+    "module",
+    "global"
+  ];
+  var BUILT_INS = [].concat(BUILT_IN_GLOBALS, TYPES, ERROR_TYPES);
   function javascript(hljs) {
     const regex = hljs.regex;
     const hasClosingTag = (match, { after }) => {
@@ -45466,8 +46495,8 @@ var require_typescript = __commonJS((exports, module) => {
         NUMBER,
         CLASS_REFERENCE,
         {
-          className: "attr",
-          begin: IDENT_RE$1 + regex.lookahead(":"),
+          scope: "attr",
+          match: IDENT_RE$1 + regex.lookahead(":"),
           relevance: 0
         },
         FUNCTION_VARIABLE,
@@ -45576,6 +46605,7 @@ var require_typescript = __commonJS((exports, module) => {
     };
   }
   function typescript(hljs) {
+    const regex = hljs.regex;
     const tsLanguage = javascript(hljs);
     const IDENT_RE$1 = IDENT_RE;
     const TYPES2 = [
@@ -45650,15 +46680,18 @@ var require_typescript = __commonJS((exports, module) => {
     };
     Object.assign(tsLanguage.keywords, KEYWORDS$1);
     tsLanguage.exports.PARAMS_CONTAINS.push(DECORATOR);
-    const ATTRIBUTE_HIGHLIGHT = tsLanguage.contains.find((c) => c.className === "attr");
+    const ATTRIBUTE_HIGHLIGHT = tsLanguage.contains.find((c) => c.scope === "attr");
+    const OPTIONAL_KEY_OR_ARGUMENT = Object.assign({}, ATTRIBUTE_HIGHLIGHT, { match: regex.concat(IDENT_RE$1, regex.lookahead(/\s*\?:/)) });
     tsLanguage.exports.PARAMS_CONTAINS.push([
       tsLanguage.exports.CLASS_REFERENCE,
-      ATTRIBUTE_HIGHLIGHT
+      ATTRIBUTE_HIGHLIGHT,
+      OPTIONAL_KEY_OR_ARGUMENT
     ]);
     tsLanguage.contains = tsLanguage.contains.concat([
       DECORATOR,
       NAMESPACE,
-      INTERFACE
+      INTERFACE,
+      OPTIONAL_KEY_OR_ARGUMENT
     ]);
     swapMode(tsLanguage, "shebang", hljs.SHEBANG());
     swapMode(tsLanguage, "use_strict", USE_STRICT);
@@ -45675,138 +46708,6 @@ var require_typescript = __commonJS((exports, module) => {
     });
     return tsLanguage;
   }
-  var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
-  var KEYWORDS = [
-    "as",
-    "in",
-    "of",
-    "if",
-    "for",
-    "while",
-    "finally",
-    "var",
-    "new",
-    "function",
-    "do",
-    "return",
-    "void",
-    "else",
-    "break",
-    "catch",
-    "instanceof",
-    "with",
-    "throw",
-    "case",
-    "default",
-    "try",
-    "switch",
-    "continue",
-    "typeof",
-    "delete",
-    "let",
-    "yield",
-    "const",
-    "class",
-    "debugger",
-    "async",
-    "await",
-    "static",
-    "import",
-    "from",
-    "export",
-    "extends"
-  ];
-  var LITERALS = [
-    "true",
-    "false",
-    "null",
-    "undefined",
-    "NaN",
-    "Infinity"
-  ];
-  var TYPES = [
-    "Object",
-    "Function",
-    "Boolean",
-    "Symbol",
-    "Math",
-    "Date",
-    "Number",
-    "BigInt",
-    "String",
-    "RegExp",
-    "Array",
-    "Float32Array",
-    "Float64Array",
-    "Int8Array",
-    "Uint8Array",
-    "Uint8ClampedArray",
-    "Int16Array",
-    "Int32Array",
-    "Uint16Array",
-    "Uint32Array",
-    "BigInt64Array",
-    "BigUint64Array",
-    "Set",
-    "Map",
-    "WeakSet",
-    "WeakMap",
-    "ArrayBuffer",
-    "SharedArrayBuffer",
-    "Atomics",
-    "DataView",
-    "JSON",
-    "Promise",
-    "Generator",
-    "GeneratorFunction",
-    "AsyncFunction",
-    "Reflect",
-    "Proxy",
-    "Intl",
-    "WebAssembly"
-  ];
-  var ERROR_TYPES = [
-    "Error",
-    "EvalError",
-    "InternalError",
-    "RangeError",
-    "ReferenceError",
-    "SyntaxError",
-    "TypeError",
-    "URIError"
-  ];
-  var BUILT_IN_GLOBALS = [
-    "setInterval",
-    "setTimeout",
-    "clearInterval",
-    "clearTimeout",
-    "require",
-    "exports",
-    "eval",
-    "isFinite",
-    "isNaN",
-    "parseFloat",
-    "parseInt",
-    "decodeURI",
-    "decodeURIComponent",
-    "encodeURI",
-    "encodeURIComponent",
-    "escape",
-    "unescape"
-  ];
-  var BUILT_IN_VARIABLES = [
-    "arguments",
-    "this",
-    "super",
-    "console",
-    "window",
-    "document",
-    "localStorage",
-    "sessionStorage",
-    "module",
-    "global"
-  ];
-  var BUILT_INS = [].concat(BUILT_IN_GLOBALS, TYPES, ERROR_TYPES);
   module.exports = typescript;
 });
 
@@ -46913,12 +47814,12 @@ var require_vhdl = __commonJS((exports, module) => {
         },
         {
           className: "string",
-          begin: "\'(U|X|0|1|Z|W|L|H|-)\'",
+          begin: "'(U|X|0|1|Z|W|L|H|-)'",
           contains: [hljs.BACKSLASH_ESCAPE]
         },
         {
           className: "symbol",
-          begin: "\'[A-Za-z](_?[A-Za-z0-9])*",
+          begin: "'[A-Za-z](_?[A-Za-z0-9])*",
           contains: [hljs.BACKSLASH_ESCAPE]
         }
       ]
@@ -46942,8 +47843,8 @@ var require_vim = __commonJS((exports, module) => {
         hljs.NUMBER_MODE,
         {
           className: "string",
-          begin: "\'",
-          end: "\'",
+          begin: "'",
+          end: "'",
           illegal: "\\n"
         },
         {
@@ -47399,8 +48300,8 @@ var require_x86asm = __commonJS((exports, module) => {
           className: "string",
           variants: [
             {
-              begin: "\'",
-              end: "[^\\\\]\'"
+              begin: "'",
+              end: "[^\\\\]'"
             },
             {
               begin: "`",
@@ -47586,8 +48487,8 @@ var require_xl = __commonJS((exports, module) => {
     };
     const SINGLE_QUOTE_TEXT = {
       className: "string",
-      begin: "\'",
-      end: "\'",
+      begin: "'",
+      end: "'",
       illegal: "\\n"
     };
     const LONG_TEXT = {
@@ -48285,10 +49186,6 @@ var require_error = __commonJS((exports) => {
 
 // node_modules/commander/lib/argument.js
 var require_argument = __commonJS((exports) => {
-  function humanReadableArgName(arg) {
-    const nameOutput = arg.name() + (arg.variadic === true ? "..." : "");
-    return arg.required ? "<" + nameOutput + ">" : "[" + nameOutput + "]";
-  }
   var { InvalidArgumentError } = require_error();
 
   class Argument {
@@ -48357,6 +49254,10 @@ var require_argument = __commonJS((exports) => {
       this.required = false;
       return this;
     }
+  }
+  function humanReadableArgName(arg) {
+    const nameOutput = arg.name() + (arg.variadic === true ? "..." : "");
+    return arg.required ? "<" + nameOutput + ">" : "[" + nameOutput + "]";
   }
   exports.Argument = Argument;
   exports.humanReadableArgName = humanReadableArgName;
@@ -48534,7 +49435,8 @@ var require_help = __commonJS((exports) => {
         return term;
       }
       function formatList(textArray) {
-        return textArray.join("\n").replace(/^/gm, " ".repeat(itemIndentWidth));
+        return textArray.join(`
+`).replace(/^/gm, " ".repeat(itemIndentWidth));
       }
       let output = [`Usage: ${helper.commandUsage(cmd)}`, ""];
       const commandDescription = helper.commandDescription(cmd);
@@ -48574,13 +49476,14 @@ var require_help = __commonJS((exports) => {
       if (commandList.length > 0) {
         output = output.concat(["Commands:", formatList(commandList), ""]);
       }
-      return output.join("\n");
+      return output.join(`
+`);
     }
     padWidth(cmd, helper) {
       return Math.max(helper.longestOptionTermLength(cmd, helper), helper.longestGlobalOptionTermLength(cmd, helper), helper.longestSubcommandTermLength(cmd, helper), helper.longestArgumentTermLength(cmd, helper));
     }
     wrap(str, width, indent, minColumnWidth = 40) {
-      const indents = " \\f\\t\\v\xA0\u1680\u2000-\u200A\u202F\u205F\u3000\uFEFF";
+      const indents = " \\f\\t\\v   -   　\uFEFF";
       const manualIndent = new RegExp(`[\\n][${indents}]+`);
       if (str.match(manualIndent))
         return str;
@@ -48588,17 +49491,22 @@ var require_help = __commonJS((exports) => {
       if (columnWidth < minColumnWidth)
         return str;
       const leadingStr = str.slice(0, indent);
-      const columnText = str.slice(indent).replace("\r\n", "\n");
+      const columnText = str.slice(indent).replace(`\r
+`, `
+`);
       const indentString = " ".repeat(indent);
-      const zeroWidthSpace = "\u200B";
+      const zeroWidthSpace = "​";
       const breaks = `\\s${zeroWidthSpace}`;
-      const regex = new RegExp(`\n|.{1,${columnWidth - 1}}([${breaks}]|\$)|[^${breaks}]+?([${breaks}]|\$)`, "g");
+      const regex = new RegExp(`
+|.{1,${columnWidth - 1}}([${breaks}]|$)|[^${breaks}]+?([${breaks}]|$)`, "g");
       const lines = columnText.match(regex) || [];
       return leadingStr + lines.map((line, i) => {
-        if (line === "\n")
+        if (line === `
+`)
           return "";
         return (i > 0 ? indentString : "") + line.trimEnd();
-      }).join("\n");
+      }).join(`
+`);
     }
   }
   exports.Help = Help;
@@ -48606,24 +49514,6 @@ var require_help = __commonJS((exports) => {
 
 // node_modules/commander/lib/option.js
 var require_option = __commonJS((exports) => {
-  function camelcase(str) {
-    return str.split("-").reduce((str2, word) => {
-      return str2 + word[0].toUpperCase() + word.slice(1);
-    });
-  }
-  function splitOptionFlags(flags) {
-    let shortFlag;
-    let longFlag;
-    const flagParts = flags.split(/[ |,]+/);
-    if (flagParts.length > 1 && !/^[[<]/.test(flagParts[1]))
-      shortFlag = flagParts.shift();
-    longFlag = flagParts.shift();
-    if (!shortFlag && /^-[^-]$/.test(longFlag)) {
-      shortFlag = longFlag;
-      longFlag = undefined;
-    }
-    return { shortFlag, longFlag };
-  }
   var { InvalidArgumentError } = require_error();
 
   class Option {
@@ -48751,12 +49641,31 @@ var require_option = __commonJS((exports) => {
       return option.negate === (negativeValue === value);
     }
   }
+  function camelcase(str) {
+    return str.split("-").reduce((str2, word) => {
+      return str2 + word[0].toUpperCase() + word.slice(1);
+    });
+  }
+  function splitOptionFlags(flags) {
+    let shortFlag;
+    let longFlag;
+    const flagParts = flags.split(/[ |,]+/);
+    if (flagParts.length > 1 && !/^[[<]/.test(flagParts[1]))
+      shortFlag = flagParts.shift();
+    longFlag = flagParts.shift();
+    if (!shortFlag && /^-[^-]$/.test(longFlag)) {
+      shortFlag = longFlag;
+      longFlag = undefined;
+    }
+    return { shortFlag, longFlag };
+  }
   exports.Option = Option;
   exports.DualOptions = DualOptions;
 });
 
 // node_modules/commander/lib/suggestSimilar.js
 var require_suggestSimilar = __commonJS((exports) => {
+  var maxDistance = 3;
   function editDistance(a, b) {
     if (Math.abs(a.length - b.length) > maxDistance)
       return Math.max(a.length, b.length);
@@ -48815,48 +49724,20 @@ var require_suggestSimilar = __commonJS((exports) => {
       similar = similar.map((candidate) => `--${candidate}`);
     }
     if (similar.length > 1) {
-      return `\n(Did you mean one of ${similar.join(", ")}?)`;
+      return `
+(Did you mean one of ${similar.join(", ")}?)`;
     }
     if (similar.length === 1) {
-      return `\n(Did you mean ${similar[0]}?)`;
+      return `
+(Did you mean ${similar[0]}?)`;
     }
     return "";
   }
-  var maxDistance = 3;
   exports.suggestSimilar = suggestSimilar;
 });
 
 // node_modules/commander/lib/command.js
 var require_command = __commonJS((exports) => {
-  function incrementNodeInspectorPort(args) {
-    return args.map((arg) => {
-      if (!arg.startsWith("--inspect")) {
-        return arg;
-      }
-      let debugOption;
-      let debugHost = "127.0.0.1";
-      let debugPort = "9229";
-      let match;
-      if ((match = arg.match(/^(--inspect(-brk)?)$/)) !== null) {
-        debugOption = match[1];
-      } else if ((match = arg.match(/^(--inspect(-brk|-port)?)=([^:]+)$/)) !== null) {
-        debugOption = match[1];
-        if (/^\d+$/.test(match[3])) {
-          debugPort = match[3];
-        } else {
-          debugHost = match[3];
-        }
-      } else if ((match = arg.match(/^(--inspect(-brk|-port)?)=([^:]+):(\d+)$/)) !== null) {
-        debugOption = match[1];
-        debugHost = match[3];
-        debugPort = match[4];
-      }
-      if (debugOption && debugPort !== "0") {
-        return `${debugOption}=${debugHost}:${parseInt(debugPort) + 1}`;
-      }
-      return arg;
-    });
-  }
   var EventEmitter = __require("node:events").EventEmitter;
   var childProcess = __require("node:child_process");
   var path = __require("node:path");
@@ -49093,8 +49974,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
         this._exitCallback = (err) => {
           if (err.code !== "commander.executeSubCommandAsync") {
             throw err;
-          } else {
-          }
+          } else {}
         };
       }
       return this;
@@ -49764,11 +50644,14 @@ Expecting one of '${allowedValues.join("', '")}'`);
       return this._getCommandAndAncestors().reduce((combinedOptions, cmd) => Object.assign(combinedOptions, cmd.opts()), {});
     }
     error(message, errorOptions) {
-      this._outputConfiguration.outputError(`${message}\n`, this._outputConfiguration.writeErr);
+      this._outputConfiguration.outputError(`${message}
+`, this._outputConfiguration.writeErr);
       if (typeof this._showHelpAfterError === "string") {
-        this._outputConfiguration.writeErr(`${this._showHelpAfterError}\n`);
+        this._outputConfiguration.writeErr(`${this._showHelpAfterError}
+`);
       } else if (this._showHelpAfterError) {
-        this._outputConfiguration.writeErr("\n");
+        this._outputConfiguration.writeErr(`
+`);
         this.outputHelp({ error: true });
       }
       const config = errorOptions || {};
@@ -49887,7 +50770,8 @@ Expecting one of '${allowedValues.join("', '")}'`);
       this._versionOptionName = versionOption.attributeName();
       this._registerOption(versionOption);
       this.on("option:" + versionOption.name(), () => {
-        this._outputConfiguration.writeOut(`${str}\n`);
+        this._outputConfiguration.writeOut(`${str}
+`);
         this._exit(0, "commander.version", str);
       });
       return this;
@@ -50048,7 +50932,8 @@ Expecting one of '${allowedValues.join("', '")}'`);
           helpStr = text;
         }
         if (helpStr) {
-          context.write(`${helpStr}\n`);
+          context.write(`${helpStr}
+`);
         }
       });
       return this;
@@ -50061,6 +50946,35 @@ Expecting one of '${allowedValues.join("', '")}'`);
         this._exit(0, "commander.helpDisplayed", "(outputHelp)");
       }
     }
+  }
+  function incrementNodeInspectorPort(args) {
+    return args.map((arg) => {
+      if (!arg.startsWith("--inspect")) {
+        return arg;
+      }
+      let debugOption;
+      let debugHost = "127.0.0.1";
+      let debugPort = "9229";
+      let match;
+      if ((match = arg.match(/^(--inspect(-brk)?)$/)) !== null) {
+        debugOption = match[1];
+      } else if ((match = arg.match(/^(--inspect(-brk|-port)?)=([^:]+)$/)) !== null) {
+        debugOption = match[1];
+        if (/^\d+$/.test(match[3])) {
+          debugPort = match[3];
+        } else {
+          debugHost = match[3];
+        }
+      } else if ((match = arg.match(/^(--inspect(-brk|-port)?)=([^:]+):(\d+)$/)) !== null) {
+        debugOption = match[1];
+        debugHost = match[3];
+        debugPort = match[4];
+      }
+      if (debugOption && debugPort !== "0") {
+        return `${debugOption}=${debugHost}:${parseInt(debugPort) + 1}`;
+      }
+      return arg;
+    });
   }
   exports.Command = Command;
 });
@@ -50107,27 +51021,27 @@ var require_package = __commonJS((exports, module) => {
       "list-css": "bun run src/index.ts --list-css",
       "install:husky": "husky install",
       test: "bun test",
-      lint: "prettier --check \"src/**/*.ts\"",
-      prettier: "prettier --write \"src/**/*.ts\"",
+      lint: 'prettier --check "src/**/*.ts"',
+      prettier: 'prettier --write "src/**/*.ts"',
       build: "bun run src/build.ts",
       release: "np",
       prerelease: "bun run build"
     },
     devDependencies: {
       "bun-types": "latest",
-      husky: "^9.1.6",
-      np: "^10.0.7",
-      prettier: "^3.3.3"
+      husky: "^9.1.7",
+      np: "^10.2.0",
+      prettier: "^3.5.3"
     },
     peerDependencies: {
-      typescript: "^5.0.0"
+      typescript: "^5.3.3"
     },
     dependencies: {
       commander: "^12.1.0",
-      "highlight.js": "^11.10.0"
+      "highlight.js": "^11.11.1"
     },
     engines: {
-      node: "^16 || ^18 || ^20",
+      node: "^16 || ^18 || ^20 || ^21 || ^22",
       bun: "^1"
     }
   };
@@ -50161,7 +51075,52 @@ var {
 } = import__.default;
 
 // src/index.ts
-async function main(code, {
+var program2 = new Command;
+program2.description("Highlights source code to HTML").option("-l, --language <language>", "name of language").option("-c, --css [language]", "print out the CSS").option("-w, --wrapped", "put the output in a full HTML page").option("--html-wrap", "put the output in a full HTML page").option("-p, --preview-server", "Start a server to preview the output").option("-o, --output-file <path>", "To file instead of stdout").option("--list-css", "List possible names for CSS files and exit").option("--version", "Prints the current version").argument("[string]", "string to highlight");
+program2.parse(process.argv);
+var options = program2.opts();
+var args = program2.args;
+var code = "";
+if (args[0]) {
+  if (existsSync(args[0])) {
+    if (!options.language) {
+      const ext = extname(args[0]);
+      if (ext) {
+        options.language = ext.slice(1);
+      }
+    }
+    code = fs.readFileSync(args[0], "utf8");
+  } else {
+    code = args[0];
+  }
+} else if (options.listCss || options.version || options.css) {} else {
+  const stdinBuffer = fs.readFileSync(0);
+  code = stdinBuffer.toString();
+}
+var HTML_TEMPLATE = `<!doctype html>
+<html>
+<head>
+<style type="text/css">
+__CSS__
+</style>
+</head>
+<body>
+<pre>
+__CODE__
+</pre>
+</body>
+</html>`;
+await main(code, {
+  wrapped: options.wrapped,
+  htmlWrap: options.htmlWrap,
+  language: options.language,
+  css: options.css,
+  previewServer: options.previewServer,
+  outputFile: options.outputFile,
+  listCss: options.listCss,
+  version: options.version
+});
+async function main(code2, {
   wrapped = false,
   htmlWrap = false,
   language = "",
@@ -50173,27 +51132,30 @@ async function main(code, {
 } = {}) {
   if (version) {
     const packageJson = require_package();
-    process.stdout.write(`${packageJson.version}\n`);
+    process.stdout.write(`${packageJson.version}
+`);
     return;
   }
   if (listCss) {
     const cssNames = await getCSSNames();
-    process.stdout.write(cssNames.join("\n") + "\n");
+    process.stdout.write(cssNames.join(`
+`) + `
+`);
     return;
   }
   if (css === true || previewServer) {
     css = "default";
   }
   let cssContent = "";
-  if (css && !code && !previewServer) {
+  if (css && !code2 && !previewServer) {
     cssContent = await readFile(`node_modules/highlight.js/styles/${css}.css`, "utf-8");
     process.stdout.write(cssContent);
     return;
   }
-  if (!code) {
+  if (!code2) {
     throw new Error("No code to highlight");
   }
-  const output = language ? es_default.highlight(code, { language }).value : es_default.highlightAuto(code).value;
+  const output = language ? es_default.highlight(code2, { language }).value : es_default.highlightAuto(code2).value;
   if (previewServer) {
     const codeOutput = `<code class="hljs">${output}</code>`;
     startServer(codeOutput, css || "");
@@ -50236,7 +51198,7 @@ function getHeadStyle(cssName) {
 }`;
   return `<style type="text/css">${mainCSS}</style>`;
 }
-function startServer(code, cssName = "", port = 3000) {
+function startServer(code2, cssName = "", port = 3000) {
   Bun.serve({
     port,
     async fetch(req) {
@@ -50247,8 +51209,11 @@ function startServer(code, cssName = "", port = 3000) {
         for (const name of cssNames) {
           choicesHtml += `<li><a href="?css=${name}">${name}</a></li>`;
         }
-        choicesHtml += "</ul>\n<hr>\n";
-        const choicesStyle = "<style>ul.choices li { display:inline; margin-right: 5px }</style>\n";
+        choicesHtml += `</ul>
+<hr>
+`;
+        const choicesStyle = `<style>ul.choices li { display:inline; margin-right: 5px }</style>
+`;
         const loadedCssName = url.searchParams.get("css") || cssName;
         let css = "";
         try {
@@ -50259,7 +51224,7 @@ function startServer(code, cssName = "", port = 3000) {
           }
         }
         const headStyle = getHeadStyle(loadedCssName);
-        return new Response(HTML_TEMPLATE.replace("</head>", `${headStyle}${choicesStyle}</head>`).replace("<body>", `<body>${choicesHtml}`).replace("__CODE__", code).replace("__CSS__", css), {
+        return new Response(HTML_TEMPLATE.replace("</head>", `${headStyle}${choicesStyle}</head>`).replace("<body>", `<body>${choicesHtml}`).replace("__CODE__", code2).replace("__CSS__", css), {
           headers: new Headers({
             "Content-Type": "text/html; charset=utf-8"
           })
@@ -50270,49 +51235,3 @@ function startServer(code, cssName = "", port = 3000) {
   });
   console.log(`Now open http://localhost:${port}`);
 }
-var program2 = new Command;
-program2.description("Highlights source code to HTML").option("-l, --language <language>", "name of language").option("-c, --css [language]", "print out the CSS").option("-w, --wrapped", "put the output in a full HTML page").option("--html-wrap", "put the output in a full HTML page").option("-p, --preview-server", "Start a server to preview the output").option("-o, --output-file <path>", "To file instead of stdout").option("--list-css", "List possible names for CSS files and exit").option("--version", "Prints the current version").argument("[string]", "string to highlight");
-program2.parse(process.argv);
-var options = program2.opts();
-var args = program2.args;
-var code = "";
-if (args[0]) {
-  if (existsSync(args[0])) {
-    if (!options.language) {
-      const ext = extname(args[0]);
-      if (ext) {
-        options.language = ext.slice(1);
-      }
-    }
-    code = fs.readFileSync(args[0], "utf8");
-  } else {
-    code = args[0];
-  }
-} else if (options.listCss || options.version || options.css) {
-} else {
-  const stdinBuffer = fs.readFileSync(0);
-  code = stdinBuffer.toString();
-}
-var HTML_TEMPLATE = `<!doctype html>
-<html>
-<head>
-<style type="text/css">
-__CSS__
-</style>
-</head>
-<body>
-<pre>
-__CODE__
-</pre>
-</body>
-</html>`;
-await main(code, {
-  wrapped: options.wrapped,
-  htmlWrap: options.htmlWrap,
-  language: options.language,
-  css: options.css,
-  previewServer: options.previewServer,
-  outputFile: options.outputFile,
-  listCss: options.listCss,
-  version: options.version
-});
