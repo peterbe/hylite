@@ -34,7 +34,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
-    "commander": "^12.1.0",
+    "commander": "^14.0.0",
     "highlight.js": "^11.11.1"
   },
   "engines": {
