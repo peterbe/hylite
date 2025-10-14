@@ -8,9 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
-        with:
-          bun-version: latest
+      - uses: oven-sh/setup-bun@v2
       - run: bun install
       # You can't run `bun run build` and expect the dist/index.js to be
       # deterministic at the moment.
