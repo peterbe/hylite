@@ -1,13 +1,10 @@
 #!/usr/bin/env bun
 
-import fs from "fs";
-import { readFile, writeFile } from "fs/promises";
-import { readdir } from "fs/promises";
-import { extname } from "path";
-import { existsSync } from "fs";
-import hljs from "highlight.js";
-
+import fs, { existsSync } from "node:fs";
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { extname } from "node:path";
 import { Command } from "commander";
+import hljs from "highlight.js";
 
 const program = new Command();
 program
@@ -103,7 +100,7 @@ async function main(
   }
   if (listCss) {
     const cssNames = await getCSSNames();
-    process.stdout.write(cssNames.join("\n") + "\n");
+    process.stdout.write(`${cssNames.join("\n")}\n`);
     return;
   }
 
@@ -172,7 +169,7 @@ async function getCSSNames() {
 function getHeadStyle(cssName: string) {
   const darkMode = /\bdark\b/.test(cssName);
 
-  let mainCSS = `body {
+  const mainCSS = `body {
     margin: 0;
     padding: 0;
     font-family: monospace;

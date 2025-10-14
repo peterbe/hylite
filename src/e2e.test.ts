@@ -1,6 +1,5 @@
-import { execa } from "execa";
-
 import { expect, test } from "bun:test";
+import { execa } from "execa";
 
 async function run(...args: string[]) {
   return await execa("bun", ["run", "src/index.ts", ...args]);
