@@ -28,7 +28,8 @@
     "lint:fix": "biome check --write --unsafe",
     "build": "bun run src/build.ts",
     "release": "np --yolo",
-    "prerelease": "bun run build"
+    "prerelease": "bun run build",
+    "postinstall": "bun run build"
   },
   "devDependencies": {
     "@biomejs/biome": "2.2.6",

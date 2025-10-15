@@ -51285,10 +51285,11 @@ var require_package = __commonJS((exports, module) => {
       "lint:fix": "biome check --write --unsafe",
       build: "bun run src/build.ts",
       release: "np --yolo",
-      prerelease: "bun run build"
+      prerelease: "bun run build",
+      postinstall: "bun run build"
     },
     devDependencies: {
-      "@biomejs/biome": "^2.2.6",
+      "@biomejs/biome": "2.2.6",
       "bun-types": "1.3.0",
       husky: "^9.1.7",
       np: "^10.2.0"
