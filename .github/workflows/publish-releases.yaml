@@ -1,0 +1,46 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-releases:
+    name: Publish binaries
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target:
+          - target: bun-linux-arm64
+            asset_name: hylite-linux-arm64
+          - target: bun-linux-x64
+            asset_name: hylite-linux-x64
+          - target: bun-windows-x64
+            asset_name: hylite-windows-x64.exe
+          - target: bun-darwin-arm64
+            asset_name: hylite-darwin-arm64
+          - target: bun-darwin-x64
+            asset_name: hylite-darwin-x64
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - name: Build
+        run: |
+          bun build src/index.ts --compile --minify --sourcemap --bytecode --target=${{ matrix.target.target }} --outfile out/${{ matrix.target.asset_name }}
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: out/${{ matrix.target.asset_name }}
+          asset_name: ${{ matrix.target.asset_name }}
+          tag: ${{ github.ref }}
+          # overwrite: true
+          # body: "Binary release for ${{ matrix.target.target }}"
