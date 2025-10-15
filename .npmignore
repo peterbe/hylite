@@ -4,3 +4,6 @@ bun.lockb
 .github/
 src/build.ts
 src/e2e.test.ts
+out/
+biome.json
+justfile
