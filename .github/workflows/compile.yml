@@ -1,0 +1,37 @@
+name: Compile test
+
+on:
+  pull_request:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: |
+
+          set -e
+
+          bun run compile:linux-arm64
+          ls out/hylite-linux-arm64
+
+          bun run compile:linux-x64
+          ls out/hylite-linux-x64
+
+          bun run compile:darwin-arm64
+          ls out/hylite-darwin-arm64
+
+          bun run compile:darwin-x64
+          ls out/hylite-darwin-x64
+
+          bun run compile:windows-x64
+          ls out/hylite-windows-x64.exe
+
+          bun run compile
+          ./out/hylite --help
+          ./out/hylite --version
+          ./out/hylite .github/workflows/build.yml
+          ./out/hylite -l yml < .github/workflows/build.yml
+          cat .github/workflows/build.yml | ./out/hylite -l yml

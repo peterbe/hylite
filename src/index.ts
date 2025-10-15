@@ -60,7 +60,7 @@ __CODE__
 </body>
 </html>`;
 
-await main(code, {
+main(code, {
   wrapped: options.wrapped,
   htmlWrap: options.htmlWrap,
   language: options.language,
