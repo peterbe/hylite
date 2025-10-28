@@ -27,5 +27,4 @@ release:
     bun run release
 
 upgrade:
-    bun update --interactive
-    bunx biome migrate --write
+    bun update --interactive && bun install
