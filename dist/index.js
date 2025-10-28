@@ -1598,7 +1598,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
         return arg.length > 1 && arg[0] === "-";
       }
       const negativeNumberArg = (arg) => {
-        if (!/^-\d*\.?\d+(e[+-]?\d+)?$/.test(arg))
+        if (!/^-(\d+|\d*\.\d+)(e[+-]?\d+)?$/.test(arg))
           return false;
         return !this._getCommandAndAncestors().some((cmd) => cmd.options.map((opt) => opt.short).some((short) => /^-\d$/.test(short)));
       };
@@ -51289,8 +51289,8 @@ var require_package = __commonJS((exports, module) => {
       postinstall: "bun run build"
     },
     devDependencies: {
-      "@biomejs/biome": "2.2.6",
-      "bun-types": "1.3.0",
+      "@biomejs/biome": "2.3.2",
+      "bun-types": "1.3.1",
       husky: "^9.1.7",
       np: "^10.2.0"
     },
@@ -51298,7 +51298,7 @@ var require_package = __commonJS((exports, module) => {
       typescript: "^5.9.3"
     },
     dependencies: {
-      commander: "^14.0.1",
+      commander: "^14.0.2",
       "highlight.js": "^11.11.1"
     },
     engines: {
