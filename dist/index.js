@@ -51286,11 +51286,11 @@ var require_package = __commonJS((exports, module) => {
       build: "bun run src/build.ts",
       release: "np --yolo",
       prerelease: "bun run build",
-      postinstall: "bun run build"
+      postinstall: "bun run build && bunx biome migrate --write"
     },
     devDependencies: {
-      "@biomejs/biome": "2.3.2",
-      "bun-types": "1.3.1",
+      "@biomejs/biome": "2.3.8",
+      "bun-types": "1.3.4",
       husky: "^9.1.7",
       np: "^10.2.0"
     },
