@@ -7,22 +7,47 @@ var __getProtoOf = Object.getPrototypeOf;
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+function __accessProp(key) {
+  return this[key];
+}
+var __toESMCache_node;
+var __toESMCache_esm;
 var __toESM = (mod, isNodeMode, target) => {
+  var canCache = mod != null && typeof mod === "object";
+  if (canCache) {
+    var cache = isNodeMode ? __toESMCache_node ??= new WeakMap : __toESMCache_esm ??= new WeakMap;
+    var cached = cache.get(mod);
+    if (cached)
+      return cached;
+  }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
-  for (let key of __getOwnPropNames(mod))
-    if (!__hasOwnProp.call(to, key))
-      __defProp(to, key, {
-        get: () => mod[key],
-        enumerable: true
-      });
+  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  if (mod && typeof mod === "object" || typeof mod === "function") {
+    for (let key of __getOwnPropNames(mod))
+      if (!__hasOwnProp.call(to, key))
+        __defProp(to, key, {
+          get: __accessProp.bind(mod, key),
+          enumerable: true
+        });
+  }
+  if (canCache)
+    cache.set(mod, to);
   return to;
 };
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
+var __exportCjs = (target, getters, setters) => {
+  for (var name in getters)
+    __defProp(target, name, {
+      get: getters[name],
+      set: setters[name],
+      enumerable: true,
+      configurable: true
+    });
+};
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // node_modules/commander/lib/error.js
-var require_error = __commonJS((exports) => {
+var require_error = __commonJS(function(exports) {
   class CommanderError extends Error {
     constructor(exitCode, code, message) {
       super(message);
@@ -46,7 +71,7 @@ var require_error = __commonJS((exports) => {
 });
 
 // node_modules/commander/lib/argument.js
-var require_argument = __commonJS((exports) => {
+var require_argument = __commonJS(function(exports) {
   var { InvalidArgumentError } = require_error();
 
   class Argument {
@@ -126,7 +151,7 @@ var require_argument = __commonJS((exports) => {
 });
 
 // node_modules/commander/lib/help.js
-var require_help = __commonJS((exports) => {
+var require_help = __commonJS(function(exports) {
   var { humanReadableArgName } = require_argument();
 
   class Help {
@@ -141,7 +166,7 @@ var require_help = __commonJS((exports) => {
       this.helpWidth = this.helpWidth ?? contextOptions.helpWidth ?? 80;
     }
     visibleCommands(cmd) {
-      const visibleCommands = cmd.commands.filter((cmd2) => !cmd2._hidden);
+      const visibleCommands = cmd.commands.filter((cmd) => !cmd._hidden);
       const helpCommand = cmd._getHelpCommand();
       if (helpCommand && !helpCommand._hidden) {
         visibleCommands.push(helpCommand);
@@ -483,7 +508,7 @@ ${itemIndentStr}`);
 });
 
 // node_modules/commander/lib/option.js
-var require_option = __commonJS((exports) => {
+var require_option = __commonJS(function(exports) {
   var { InvalidArgumentError } = require_error();
 
   class Option {
@@ -621,8 +646,8 @@ var require_option = __commonJS((exports) => {
     }
   }
   function camelcase(str) {
-    return str.split("-").reduce((str2, word) => {
-      return str2 + word[0].toUpperCase() + word.slice(1);
+    return str.split("-").reduce((str, word) => {
+      return str + word[0].toUpperCase() + word.slice(1);
     });
   }
   function splitOptionFlags(flags) {
@@ -667,7 +692,7 @@ var require_option = __commonJS((exports) => {
 });
 
 // node_modules/commander/lib/suggestSimilar.js
-var require_suggestSimilar = __commonJS((exports) => {
+var require_suggestSimilar = __commonJS(function(exports) {
   var maxDistance = 3;
   function editDistance(a, b) {
     if (Math.abs(a.length - b.length) > maxDistance)
@@ -740,7 +765,7 @@ var require_suggestSimilar = __commonJS((exports) => {
 });
 
 // node_modules/commander/lib/command.js
-var require_command = __commonJS((exports) => {
+var require_command = __commonJS(function(exports) {
   var EventEmitter = __require("node:events").EventEmitter;
   var childProcess = __require("node:child_process");
   var path = __require("node:path");
@@ -993,7 +1018,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
         this._exitCallback = (err) => {
           if (err.code !== "commander.executeSubCommandAsync") {
             throw err;
-          } else {}
+          }
         };
       }
       return this;
@@ -1193,44 +1218,44 @@ Expecting one of '${allowedValues.join("', '")}'`);
       });
       return source;
     }
-    _prepareUserArgs(argv, parseOptions) {
-      if (argv !== undefined && !Array.isArray(argv)) {
+    _prepareUserArgs(argv2, parseOptions) {
+      if (argv2 !== undefined && !Array.isArray(argv2)) {
         throw new Error("first parameter to parse must be array or undefined");
       }
       parseOptions = parseOptions || {};
-      if (argv === undefined && parseOptions.from === undefined) {
+      if (argv2 === undefined && parseOptions.from === undefined) {
         if (process2.versions?.electron) {
           parseOptions.from = "electron";
         }
-        const execArgv = process2.execArgv ?? [];
-        if (execArgv.includes("-e") || execArgv.includes("--eval") || execArgv.includes("-p") || execArgv.includes("--print")) {
+        const execArgv2 = process2.execArgv ?? [];
+        if (execArgv2.includes("-e") || execArgv2.includes("--eval") || execArgv2.includes("-p") || execArgv2.includes("--print")) {
           parseOptions.from = "eval";
         }
       }
-      if (argv === undefined) {
-        argv = process2.argv;
+      if (argv2 === undefined) {
+        argv2 = process2.argv;
       }
-      this.rawArgs = argv.slice();
+      this.rawArgs = argv2.slice();
       let userArgs;
       switch (parseOptions.from) {
         case undefined:
         case "node":
-          this._scriptPath = argv[1];
-          userArgs = argv.slice(2);
+          this._scriptPath = argv2[1];
+          userArgs = argv2.slice(2);
           break;
         case "electron":
           if (process2.defaultApp) {
-            this._scriptPath = argv[1];
-            userArgs = argv.slice(2);
+            this._scriptPath = argv2[1];
+            userArgs = argv2.slice(2);
           } else {
-            userArgs = argv.slice(1);
+            userArgs = argv2.slice(1);
           }
           break;
         case "user":
-          userArgs = argv.slice(0);
+          userArgs = argv2.slice(0);
           break;
         case "eval":
-          userArgs = argv.slice(1);
+          userArgs = argv2.slice(1);
           break;
         default:
           throw new Error(`unexpected parse option { from: '${parseOptions.from}' }`);
@@ -1753,18 +1778,18 @@ Expecting one of '${allowedValues.join("', '")}'`);
       this.error(message, { code: "commander.missingMandatoryOptionValue" });
     }
     _conflictingOption(option, conflictingOption) {
-      const findBestOptionFromValue = (option2) => {
-        const optionKey = option2.attributeName();
+      const findBestOptionFromValue = (option) => {
+        const optionKey = option.attributeName();
         const optionValue = this.getOptionValue(optionKey);
         const negativeOption = this.options.find((target) => target.negate && optionKey === target.attributeName());
         const positiveOption = this.options.find((target) => !target.negate && optionKey === target.attributeName());
         if (negativeOption && (negativeOption.presetArg === undefined && optionValue === false || negativeOption.presetArg !== undefined && optionValue === negativeOption.presetArg)) {
           return negativeOption;
         }
-        return positiveOption || option2;
+        return positiveOption || option;
       };
-      const getErrorMessage = (option2) => {
-        const bestOption = findBestOptionFromValue(option2);
+      const getErrorMessage = (option) => {
+        const bestOption = findBestOptionFromValue(option);
         const optionKey = bestOption.attributeName();
         const source = this.getOptionValueSource(optionKey);
         if (source === "env") {
@@ -1918,10 +1943,10 @@ Expecting one of '${allowedValues.join("', '")}'`);
       this._name = path.basename(filename, path.extname(filename));
       return this;
     }
-    executableDir(path2) {
-      if (path2 === undefined)
+    executableDir(path) {
+      if (path === undefined)
         return this._executableDir;
-      this._executableDir = path2;
+      this._executableDir = path;
       return this;
     }
     helpInformation(contextOptions) {
@@ -2018,11 +2043,11 @@ Expecting one of '${allowedValues.join("', '")}'`);
     }
     help(contextOptions) {
       this.outputHelp(contextOptions);
-      let exitCode = Number(process2.exitCode ?? 0);
-      if (exitCode === 0 && contextOptions && typeof contextOptions !== "function" && contextOptions.error) {
-        exitCode = 1;
+      let exitCode2 = Number(process2.exitCode ?? 0);
+      if (exitCode2 === 0 && contextOptions && typeof contextOptions !== "function" && contextOptions.error) {
+        exitCode2 = 1;
       }
-      this._exit(exitCode, "commander.help", "(outputHelp)");
+      this._exit(exitCode2, "commander.help", "(outputHelp)");
     }
     addHelpText(position, text) {
       const allowedValues = ["beforeAll", "before", "after", "afterAll"];
@@ -2094,28 +2119,8 @@ Expecting one of '${allowedValues.join("', '")}'`);
   exports.useColor = useColor;
 });
 
-// node_modules/commander/index.js
-var require_commander = __commonJS((exports) => {
-  var { Argument } = require_argument();
-  var { Command } = require_command();
-  var { CommanderError, InvalidArgumentError } = require_error();
-  var { Help } = require_help();
-  var { Option } = require_option();
-  exports.program = new Command;
-  exports.createCommand = (name) => new Command(name);
-  exports.createOption = (flags, description) => new Option(flags, description);
-  exports.createArgument = (name, description) => new Argument(name, description);
-  exports.Command = Command;
-  exports.Option = Option;
-  exports.Argument = Argument;
-  exports.Help = Help;
-  exports.CommanderError = CommanderError;
-  exports.InvalidArgumentError = InvalidArgumentError;
-  exports.InvalidOptionArgumentError = InvalidArgumentError;
-});
-
 // node_modules/highlight.js/lib/core.js
-var require_core = __commonJS((exports, module) => {
+var require_core = __commonJS(function(exports, module) {
   function deepFreeze(obj) {
     if (obj instanceof Map) {
       obj.clear = obj.delete = obj.set = function() {
@@ -2347,7 +2352,7 @@ var require_core = __commonJS((exports, module) => {
     const match = re && re.exec(lexeme);
     return match && match.index === 0;
   }
-  var BACKREF_RE = /\[(?:[^\\\]]|\\.)*\]|\(\??|\\([1-9][0-9]*)|\\./;
+  var BACKREF_RE = new RegExp(either(/\[(?:[^\\\]]|\\.)*\]/, /\(\?<(?![=!])[^>]+>/, /\(\?'[^']+'/, /\(\??/, /\\([1-9][0-9]*)/, /\\./));
   function _rewriteBackreferences(regexps, { joinWith }) {
     let numCaptures = 0;
     return regexps.map((regex) => {
@@ -2367,7 +2372,7 @@ var require_core = __commonJS((exports, module) => {
           out += "\\" + String(Number(match[1]) + offset);
         } else {
           out += match[0];
-          if (match[0] === "(") {
+          if (match[0] === "(" || /^\(\?[<']/.test(match[0])) {
             numCaptures++;
           }
         }
@@ -2605,18 +2610,18 @@ var require_core = __commonJS((exports, module) => {
     } else if (Array.isArray(rawKeywords)) {
       compileList(scopeName, rawKeywords);
     } else {
-      Object.keys(rawKeywords).forEach(function(scopeName2) {
-        Object.assign(compiledKeywords, compileKeywords(rawKeywords[scopeName2], caseInsensitive, scopeName2));
+      Object.keys(rawKeywords).forEach(function(scopeName) {
+        Object.assign(compiledKeywords, compileKeywords(rawKeywords[scopeName], caseInsensitive, scopeName));
       });
     }
     return compiledKeywords;
-    function compileList(scopeName2, keywordList) {
+    function compileList(scopeName, keywordList) {
       if (caseInsensitive) {
         keywordList = keywordList.map((x) => x.toLowerCase());
       }
       keywordList.forEach(function(keyword) {
         const pair = keyword.split("|");
-        compiledKeywords[pair[0]] = [scopeName2, scoreForKeyword(pair[0], pair[1])];
+        compiledKeywords[pair[0]] = [scopeName, scoreForKeyword(pair[0], pair[1])];
       });
     }
   }
@@ -2636,11 +2641,11 @@ var require_core = __commonJS((exports, module) => {
   var warn = (message, ...args) => {
     console.log(`WARN: ${message}`, ...args);
   };
-  var deprecated = (version2, message) => {
-    if (seenDeprecations[`${version2}/${message}`])
+  var deprecated = (version, message) => {
+    if (seenDeprecations[`${version}/${message}`])
       return;
-    console.log(`Deprecated as of ${version2}. ${message}`);
-    seenDeprecations[`${version2}/${message}`] = true;
+    console.log(`Deprecated as of ${version}. ${message}`);
+    seenDeprecations[`${version}/${message}`] = true;
   };
   var MultiClassError = new Error;
   function remapScopeNames(mode, regexes, { key }) {
@@ -2734,7 +2739,7 @@ var require_core = __commonJS((exports, module) => {
         if (!match) {
           return null;
         }
-        const i = match.findIndex((el, i2) => i2 > 0 && el !== undefined);
+        const i = match.findIndex((el, i) => i > 0 && el !== undefined);
         const matchData = this.matchIndexes[i];
         match.splice(0, i);
         return Object.assign(match, matchData);
@@ -2890,7 +2895,7 @@ var require_core = __commonJS((exports, module) => {
     }
     return mode;
   }
-  var version = "11.11.1";
+  var version = "11.12.0";
 
   class HTMLInjectionError extends Error {
     constructor(reason, html) {
@@ -2937,7 +2942,7 @@ var require_core = __commonJS((exports, module) => {
       }
       return classes.split(/\s+/).find((_class) => shouldNotHighlight(_class) || getLanguage(_class));
     }
-    function highlight2(codeOrLanguageName, optionsOrCode, ignoreIllegals) {
+    function highlight(codeOrLanguageName, optionsOrCode, ignoreIllegals) {
       let code = "";
       let languageName = "";
       if (typeof optionsOrCode === "object") {
@@ -3007,21 +3012,21 @@ https://github.com/highlightjs/highlight.js/issues/2277`);
       function processSubLanguage() {
         if (modeBuffer === "")
           return;
-        let result2 = null;
+        let result = null;
         if (typeof top.subLanguage === "string") {
           if (!languages[top.subLanguage]) {
             emitter.addText(modeBuffer);
             return;
           }
-          result2 = _highlight(top.subLanguage, modeBuffer, true, continuations[top.subLanguage]);
-          continuations[top.subLanguage] = result2._top;
+          result = _highlight(top.subLanguage, modeBuffer, true, continuations[top.subLanguage]);
+          continuations[top.subLanguage] = result._top;
         } else {
-          result2 = highlightAuto(modeBuffer, top.subLanguage.length ? top.subLanguage : null);
+          result = highlightAuto(modeBuffer, top.subLanguage.length ? top.subLanguage : null);
         }
         if (top.relevance > 0) {
-          relevance += result2.relevance;
+          relevance += result.relevance;
         }
-        emitter.__addSublanguage(result2._emitter, result2.language);
+        emitter.__addSublanguage(result._emitter, result.language);
       }
       function processBuffer() {
         if (top.subLanguage != null) {
@@ -3209,8 +3214,12 @@ https://github.com/highlightjs/highlight.js/issues/2277`);
           }
         }
         if (match.type === "illegal" && lexeme === "") {
-          modeBuffer += `
+          if (match.index === codeToHighlight.length)
+            ;
+          else {
+            modeBuffer += `
 `;
+          }
           return 1;
         }
         if (iterations > 1e5 && iterations > match.index * 3) {
@@ -3361,7 +3370,7 @@ https://github.com/highlightjs/highlight.js/issues/2277`);
       }
       node = element;
       const text = node.textContent;
-      const result = language ? highlight2(text, { language, ignoreIllegals: true }) : highlightAuto(text);
+      const result = language ? highlight(text, { language, ignoreIllegals: true }) : highlightAuto(text);
       element.innerHTML = result.value;
       element.dataset.highlighted = "yes";
       updateClassName(element, language, result.language);
@@ -3488,7 +3497,7 @@ https://github.com/highlightjs/highlight.js/issues/2277`);
       return highlightElement(el);
     }
     Object.assign(hljs, {
-      highlight: highlight2,
+      highlight,
       highlightAuto,
       highlightAll,
       highlightElement,
@@ -3536,7 +3545,7 @@ https://github.com/highlightjs/highlight.js/issues/2277`);
 });
 
 // node_modules/highlight.js/lib/languages/1c.js
-var require_1c = __commonJS((exports, module) => {
+var require__1c = __commonJS(function(exports, module) {
   function _1c(hljs) {
     const UNDERSCORE_IDENT_RE = "[A-Za-zА-Яа-яёЁ_][A-Za-zА-Яа-яёЁ_0-9]+";
     const v7_keywords = "далее ";
@@ -3687,7 +3696,7 @@ var require_1c = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/abnf.js
-var require_abnf = __commonJS((exports, module) => {
+var require_abnf = __commonJS(function(exports, module) {
   function abnf(hljs) {
     const regex = hljs.regex;
     const IDENT = /^[a-zA-Z][a-zA-Z0-9-]*/;
@@ -3755,7 +3764,7 @@ var require_abnf = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/accesslog.js
-var require_accesslog = __commonJS((exports, module) => {
+var require_accesslog = __commonJS(function(exports, module) {
   function accesslog(hljs) {
     const regex = hljs.regex;
     const HTTP_VERBS = [
@@ -3830,7 +3839,7 @@ var require_accesslog = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/actionscript.js
-var require_actionscript = __commonJS((exports, module) => {
+var require_actionscript = __commonJS(function(exports, module) {
   function actionscript(hljs) {
     const regex = hljs.regex;
     const IDENT_RE = /[a-zA-Z_$][a-zA-Z0-9_$]*/;
@@ -3972,7 +3981,7 @@ var require_actionscript = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/ada.js
-var require_ada = __commonJS((exports, module) => {
+var require_ada = __commonJS(function(exports, module) {
   function ada(hljs) {
     const INTEGER_RE = "\\d(_|\\d)*";
     const EXPONENT_RE = "[eE][-+]?" + INTEGER_RE;
@@ -3981,7 +3990,7 @@ var require_ada = __commonJS((exports, module) => {
     const BASED_LITERAL_RE = INTEGER_RE + "#" + BASED_INTEGER_RE + "(\\." + BASED_INTEGER_RE + ")?" + "#" + "(" + EXPONENT_RE + ")?";
     const NUMBER_RE = "\\b(" + BASED_LITERAL_RE + "|" + DECIMAL_LITERAL_RE + ")";
     const ID_REGEX = "[A-Za-z](_?[A-Za-z0-9.])*";
-    const BAD_CHARS = `[]\\{\\}%#'"`;
+    const BAD_CHARS = `\\{\\}%#'"`;
     const COMMENTS = hljs.COMMENT("--", "$");
     const VAR_DECLS = {
       begin: "\\s+:\\s+",
@@ -4075,7 +4084,8 @@ var require_ada = __commonJS((exports, module) => {
       "do",
       "mod",
       "requeue",
-      "xor"
+      "xor",
+      "parallel"
     ];
     return {
       name: "Ada",
@@ -4166,7 +4176,7 @@ var require_ada = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/angelscript.js
-var require_angelscript = __commonJS((exports, module) => {
+var require_angelscript = __commonJS(function(exports, module) {
   function angelscript(hljs) {
     const builtInTypeMode = {
       className: "built_in",
@@ -4320,7 +4330,7 @@ var require_angelscript = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/apache.js
-var require_apache = __commonJS((exports, module) => {
+var require_apache = __commonJS(function(exports, module) {
   function apache(hljs) {
     const NUMBER_REF = {
       className: "number",
@@ -4413,7 +4423,7 @@ var require_apache = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/applescript.js
-var require_applescript = __commonJS((exports, module) => {
+var require_applescript = __commonJS(function(exports, module) {
   function applescript(hljs) {
     const regex = hljs.regex;
     const STRING = hljs.inherit(hljs.QUOTE_STRING_MODE, { illegal: null });
@@ -4521,7 +4531,7 @@ var require_applescript = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/arcade.js
-var require_arcade = __commonJS((exports, module) => {
+var require_arcade = __commonJS(function(exports, module) {
   function arcade(hljs) {
     const regex = hljs.regex;
     const IDENT_RE = "[A-Za-z_][0-9A-Za-z_]*";
@@ -4943,7 +4953,7 @@ var require_arcade = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/arduino.js
-var require_arduino = __commonJS((exports, module) => {
+var require_arduino = __commonJS(function(exports, module) {
   function cPlusPlus(hljs) {
     const regex = hljs.regex;
     const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -4971,8 +4981,8 @@ var require_arduino = __commonJS((exports, module) => {
           illegal: "."
         },
         hljs.END_SAME_AS_BEGIN({
-          begin: /(?:u8?|U|L)?R"([^()\\ ]{0,16})\(/,
-          end: /\)([^()\\ ]{0,16})"/
+          begin: /(?:u8?|U|L)?R"([^()\\\s"]{0,16})\(/,
+          end: /\)([^()\\\s"]{0,16})"/
         })
       ]
     };
@@ -4980,13 +4990,31 @@ var require_arduino = __commonJS((exports, module) => {
       className: "number",
       variants: [
         {
-          begin: "[+-]?(?:" + "(?:" + "[0-9](?:'?[0-9])*\\.(?:[0-9](?:'?[0-9])*)?" + "|\\.[0-9](?:'?[0-9])*" + ")(?:[Ee][+-]?[0-9](?:'?[0-9])*)?" + "|[0-9](?:'?[0-9])*[Ee][+-]?[0-9](?:'?[0-9])*" + "|0[Xx](?:" + "[0-9A-Fa-f](?:'?[0-9A-Fa-f])*(?:\\.(?:[0-9A-Fa-f](?:'?[0-9A-Fa-f])*)?)?" + "|\\.[0-9A-Fa-f](?:'?[0-9A-Fa-f])*" + ")[Pp][+-]?[0-9](?:'?[0-9])*" + ")(?:" + "[Ff](?:16|32|64|128)?" + "|(BF|bf)16" + "|[Ll]" + "|" + ")"
+          begin: "[+-]?(?:" + "(?:" + "\\b[0-9](?:'?[0-9])*\\.(?:[0-9](?:'?[0-9])*)?" + "|\\.[0-9](?:'?[0-9])*" + ")(?:[Ee][+-]?[0-9](?:'?[0-9])*)?" + "|\\b[0-9](?:'?[0-9])*[Ee][+-]?[0-9](?:'?[0-9])*" + "|\\b0[Xx](?:" + "[0-9A-Fa-f](?:'?[0-9A-Fa-f])*(?:\\.(?:[0-9A-Fa-f](?:'?[0-9A-Fa-f])*)?)?" + "|\\.[0-9A-Fa-f](?:'?[0-9A-Fa-f])*" + ")[Pp][+-]?[0-9](?:'?[0-9])*" + ")(?:" + "[Ff](?:16|32|64|128)?" + "|(BF|bf)16" + "|[Ll]" + "|" + ")"
         },
         {
           begin: "[+-]?\\b(?:" + "0[Bb][01](?:'?[01])*" + "|0[Xx][0-9A-Fa-f](?:'?[0-9A-Fa-f])*" + "|0(?:'?[0-7])*" + "|[1-9](?:'?[0-9])*" + ")(?:" + "[Uu](?:LL?|ll?)" + "|[Uu][Zz]?" + "|(?:LL?|ll?)[Uu]?" + "|[Zz][Uu]" + "|" + ")"
         }
       ],
       relevance: 0
+    };
+    const PREPROCESSOR_INCLUDE = {
+      scope: "meta",
+      begin: /#\s*include\b/,
+      end: /$/,
+      keywords: { keyword: "include" },
+      contains: [
+        {
+          begin: /\\\n/
+        },
+        STRINGS,
+        {
+          scope: "string",
+          begin: /<.*?>/
+        },
+        C_LINE_COMMENT_MODE,
+        hljs.C_BLOCK_COMMENT_MODE
+      ]
     };
     const PREPROCESSOR = {
       className: "meta",
@@ -4999,20 +5027,21 @@ var require_arduino = __commonJS((exports, module) => {
           relevance: 0
         },
         hljs.inherit(STRINGS, { className: "string" }),
-        {
-          className: "string",
-          begin: /<.*?>/
-        },
         C_LINE_COMMENT_MODE,
         hljs.C_BLOCK_COMMENT_MODE
       ]
     };
+    const PREPROCESSORS = [
+      PREPROCESSOR_INCLUDE,
+      PREPROCESSOR
+    ];
     const TITLE_MODE = {
       className: "title",
       begin: regex.optional(NAMESPACE_RE) + hljs.IDENT_RE,
       relevance: 0
     };
     const FUNCTION_TITLE = regex.optional(NAMESPACE_RE) + hljs.IDENT_RE + "\\s*\\(";
+    const MAX_FUNCTION_TYPE_TOKENS = 12;
     const RESERVED_KEYWORDS = [
       "alignas",
       "alignof",
@@ -5302,11 +5331,11 @@ var require_arduino = __commonJS((exports, module) => {
       keywords: {
         _hint: FUNCTION_HINTS
       },
-      begin: regex.concat(/\b/, /(?!decltype)/, /(?!if)/, /(?!for)/, /(?!switch)/, /(?!while)/, hljs.IDENT_RE, regex.lookahead(/(<[^<>]+>|)\s*\(/))
+      begin: regex.concat(/\b/, `(?!${RESERVED_KEYWORDS.join("|")})`, hljs.IDENT_RE, regex.lookahead(/(<[^<>]+>|)\s*\(/))
     };
     const EXPRESSION_CONTAINS = [
       FUNCTION_DISPATCH,
-      PREPROCESSOR,
+      ...PREPROCESSORS,
       CPP_PRIMITIVE_TYPES,
       C_LINE_COMMENT_MODE,
       hljs.C_BLOCK_COMMENT_MODE,
@@ -5342,7 +5371,7 @@ var require_arduino = __commonJS((exports, module) => {
     };
     const FUNCTION_DECLARATION = {
       className: "function",
-      begin: "(" + FUNCTION_TYPE_RE + "[\\*&\\s]+)+" + FUNCTION_TITLE,
+      begin: "(" + FUNCTION_TYPE_RE + "[\\*&\\s]+){1," + MAX_FUNCTION_TYPE_TOKENS + "}" + FUNCTION_TITLE,
       returnBegin: true,
       end: /[{;=]/,
       excludeEnd: true,
@@ -5407,7 +5436,7 @@ var require_arduino = __commonJS((exports, module) => {
         CPP_PRIMITIVE_TYPES,
         C_LINE_COMMENT_MODE,
         hljs.C_BLOCK_COMMENT_MODE,
-        PREPROCESSOR
+        ...PREPROCESSORS
       ]
     };
     return {
@@ -5425,7 +5454,7 @@ var require_arduino = __commonJS((exports, module) => {
       illegal: "</",
       classNameAliases: { "function.dispatch": "built_in" },
       contains: [].concat(EXPRESSION_CONTEXT, FUNCTION_DECLARATION, FUNCTION_DISPATCH, EXPRESSION_CONTAINS, [
-        PREPROCESSOR,
+        ...PREPROCESSORS,
         {
           begin: "\\b(deque|list|queue|priority_queue|pair|stack|vector|map|set|bitset|multiset|multimap|unordered_map|unordered_set|unordered_multiset|unordered_multimap|array|tuple|optional|variant|function|flat_map|flat_set)\\s*<(?!<)",
           end: ">",
@@ -5844,7 +5873,7 @@ var require_arduino = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/armasm.js
-var require_armasm = __commonJS((exports, module) => {
+var require_armasm = __commonJS(function(exports, module) {
   function armasm(hljs) {
     const COMMENT = { variants: [
       hljs.COMMENT("^[ \\t]*(?=#)", "$", {
@@ -5924,7 +5953,7 @@ var require_armasm = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/xml.js
-var require_xml = __commonJS((exports, module) => {
+var require_xml = __commonJS(function(exports, module) {
   function xml(hljs) {
     const regex = hljs.regex;
     const TAG_NAME_RE = regex.concat(/[\p{L}_]/u, regex.optional(/[\p{L}0-9_.-]*:/u), /[\p{L}0-9_.-]*/u);
@@ -6062,10 +6091,7 @@ var require_xml = __commonJS((exports, module) => {
           starts: {
             end: /<\/style>/,
             returnEnd: true,
-            subLanguage: [
-              "css",
-              "xml"
-            ]
+            subLanguage: "css"
           }
         },
         {
@@ -6077,11 +6103,7 @@ var require_xml = __commonJS((exports, module) => {
           starts: {
             end: /<\/script>/,
             returnEnd: true,
-            subLanguage: [
-              "javascript",
-              "handlebars",
-              "xml"
-            ]
+            subLanguage: "javascript"
           }
         },
         {
@@ -6124,7 +6146,7 @@ var require_xml = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/asciidoc.js
-var require_asciidoc = __commonJS((exports, module) => {
+var require_asciidoc = __commonJS(function(exports, module) {
   function asciidoc(hljs) {
     const regex = hljs.regex;
     const HORIZONTAL_RULE = {
@@ -6318,7 +6340,7 @@ var require_asciidoc = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/aspectj.js
-var require_aspectj = __commonJS((exports, module) => {
+var require_aspectj = __commonJS(function(exports, module) {
   function aspectj(hljs) {
     const regex = hljs.regex;
     const KEYWORDS = [
@@ -6532,7 +6554,7 @@ var require_aspectj = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/autohotkey.js
-var require_autohotkey = __commonJS((exports, module) => {
+var require_autohotkey = __commonJS(function(exports, module) {
   function autohotkey(hljs) {
     const BACKTICK_ESCAPE = { begin: "`[\\s\\S]" };
     return {
@@ -6592,7 +6614,7 @@ var require_autohotkey = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/autoit.js
-var require_autoit = __commonJS((exports, module) => {
+var require_autoit = __commonJS(function(exports, module) {
   function autoit(hljs) {
     const KEYWORDS = "ByRef Case Const ContinueCase ContinueLoop " + "Dim Do Else ElseIf EndFunc EndIf EndSelect " + "EndSwitch EndWith Enum Exit ExitLoop For Func " + "Global If In Local Next ReDim Return Select Static " + "Step Switch Then To Until Volatile WEnd While With";
     const DIRECTIVES = [
@@ -6745,7 +6767,7 @@ var require_autoit = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/avrasm.js
-var require_avrasm = __commonJS((exports, module) => {
+var require_avrasm = __commonJS(function(exports, module) {
   function avrasm(hljs) {
     return {
       name: "AVR Assembly",
@@ -6792,7 +6814,7 @@ var require_avrasm = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/awk.js
-var require_awk = __commonJS((exports, module) => {
+var require_awk = __commonJS(function(exports, module) {
   function awk(hljs) {
     const VARIABLE = {
       className: "variable",
@@ -6854,7 +6876,7 @@ var require_awk = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/axapta.js
-var require_axapta = __commonJS((exports, module) => {
+var require_axapta = __commonJS(function(exports, module) {
   function axapta(hljs) {
     const IDENT_RE = hljs.UNDERSCORE_IDENT_RE;
     const BUILT_IN_KEYWORDS = [
@@ -7031,7 +7053,7 @@ var require_axapta = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/bash.js
-var require_bash = __commonJS((exports, module) => {
+var require_bash = __commonJS(function(exports, module) {
   function bash(hljs) {
     const regex = hljs.regex;
     const VAR = {};
@@ -7414,7 +7436,7 @@ var require_bash = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/basic.js
-var require_basic = __commonJS((exports, module) => {
+var require_basic = __commonJS(function(exports, module) {
   function basic(hljs) {
     const KEYWORDS = [
       "ABS",
@@ -7637,7 +7659,7 @@ var require_basic = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/bnf.js
-var require_bnf = __commonJS((exports, module) => {
+var require_bnf = __commonJS(function(exports, module) {
   function bnf(hljs) {
     return {
       name: "Backus–Naur Form",
@@ -7668,7 +7690,7 @@ var require_bnf = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/brainfuck.js
-var require_brainfuck = __commonJS((exports, module) => {
+var require_brainfuck = __commonJS(function(exports, module) {
   function brainfuck(hljs) {
     const LITERAL = {
       className: "literal",
@@ -7711,7 +7733,7 @@ var require_brainfuck = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/c.js
-var require_c = __commonJS((exports, module) => {
+var require_c = __commonJS(function(exports, module) {
   function c(hljs) {
     const regex = hljs.regex;
     const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -7719,11 +7741,12 @@ var require_c = __commonJS((exports, module) => {
     const NAMESPACE_RE = "[a-zA-Z_]\\w*::";
     const TEMPLATE_ARGUMENT_RE = "<[^<>]+>";
     const FUNCTION_TYPE_RE = "(" + DECLTYPE_AUTO_RE + "|" + regex.optional(NAMESPACE_RE) + "[a-zA-Z_]\\w*" + regex.optional(TEMPLATE_ARGUMENT_RE) + ")";
+    const ATOMIC_TYPES = regex.concat(/\batomic_/, regex.either("bool", "char", "schar", "uchar", "short", "ushort", "int", "uint", "long", "ulong", "llong", "ullong", "char16_t", "char32_t", "wchar_t", "int_least8_t", "uint_least8_t", "int_least16_t", "uint_least16_t", "int_least32_t", "uint_least32_t", "int_least64_t", "uint_least64_t", "int_fast8_t", "uint_fast8_t", "int_fast16_t", "uint_fast16_t", "int_fast32_t", "uint_fast32_t", "int_fast64_t", "uint_fast64_t", "intptr_t", "uintptr_t", "size_t", "ptrdiff_t", "intmax_t", "uintmax_t"), /\b/);
     const TYPES = {
       className: "type",
       variants: [
         { begin: "\\b[a-z\\d_]*_t\\b" },
-        { match: /\batomic_[a-z]{3,6}\b/ }
+        { match: ATOMIC_TYPES }
       ]
     };
     const CHARACTER_ESCAPES = "\\\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4,8}|[0-7]{3}|\\S)";
@@ -7742,8 +7765,8 @@ var require_c = __commonJS((exports, module) => {
           illegal: "."
         },
         hljs.END_SAME_AS_BEGIN({
-          begin: /(?:u8?|U|L)?R"([^()\\ ]{0,16})\(/,
-          end: /\)([^()\\ ]{0,16})"/
+          begin: /(?:u8?|U|L)?R"([^()\\\s"]{0,16})\(/,
+          end: /\)([^()\\\s"]{0,16})"/
         })
       ]
     };
@@ -7757,6 +7780,24 @@ var require_c = __commonJS((exports, module) => {
       ],
       relevance: 0
     };
+    const PREPROCESSOR_INCLUDE = {
+      scope: "meta",
+      begin: /#\s*include\b/,
+      end: /$/,
+      keywords: { keyword: "include" },
+      contains: [
+        {
+          begin: /\\\n/
+        },
+        STRINGS,
+        {
+          scope: "string",
+          begin: /<.*?>/
+        },
+        C_LINE_COMMENT_MODE,
+        hljs.C_BLOCK_COMMENT_MODE
+      ]
+    };
     const PREPROCESSOR = {
       className: "meta",
       begin: /#\s*[a-z]+\b/,
@@ -7768,20 +7809,21 @@ var require_c = __commonJS((exports, module) => {
           relevance: 0
         },
         hljs.inherit(STRINGS, { className: "string" }),
-        {
-          className: "string",
-          begin: /<.*?>/
-        },
         C_LINE_COMMENT_MODE,
         hljs.C_BLOCK_COMMENT_MODE
       ]
     };
+    const PREPROCESSORS = [
+      PREPROCESSOR_INCLUDE,
+      PREPROCESSOR
+    ];
     const TITLE_MODE = {
       className: "title",
       begin: regex.optional(NAMESPACE_RE) + hljs.IDENT_RE,
       relevance: 0
     };
     const FUNCTION_TITLE = regex.optional(NAMESPACE_RE) + hljs.IDENT_RE + "\\s*\\(";
+    const MAX_FUNCTION_TYPE_TOKENS = 12;
     const C_KEYWORDS = [
       "asm",
       "auto",
@@ -7865,7 +7907,7 @@ var require_c = __commonJS((exports, module) => {
       built_in: "std string wstring cin cout cerr clog stdin stdout stderr stringstream istringstream ostringstream " + "auto_ptr deque list queue stack vector map set pair bitset multiset multimap unordered_set " + "unordered_map unordered_multiset unordered_multimap priority_queue make_pair array shared_ptr abort terminate abs acos " + "asin atan2 atan calloc ceil cosh cos exit exp fabs floor fmod fprintf fputs free frexp " + "fscanf future isalnum isalpha iscntrl isdigit isgraph islower isprint ispunct isspace isupper " + "isxdigit tolower toupper labs ldexp log10 log malloc realloc memchr memcmp memcpy memset modf pow " + "printf putchar puts scanf sinh sin snprintf sprintf sqrt sscanf strcat strchr strcmp " + "strcpy strcspn strlen strncat strncmp strncpy strpbrk strrchr strspn strstr tanh tan " + "vfprintf vprintf vsprintf endl initializer_list unique_ptr"
     };
     const EXPRESSION_CONTAINS = [
-      PREPROCESSOR,
+      ...PREPROCESSORS,
       TYPES,
       C_LINE_COMMENT_MODE,
       hljs.C_BLOCK_COMMENT_MODE,
@@ -7900,7 +7942,7 @@ var require_c = __commonJS((exports, module) => {
       relevance: 0
     };
     const FUNCTION_DECLARATION = {
-      begin: "(" + FUNCTION_TYPE_RE + "[\\*&\\s]+)+" + FUNCTION_TITLE,
+      begin: "(" + FUNCTION_TYPE_RE + "[\\*&\\s]+){1," + MAX_FUNCTION_TYPE_TOKENS + "}" + FUNCTION_TITLE,
       returnBegin: true,
       end: /[{;=]/,
       excludeEnd: true,
@@ -7953,7 +7995,7 @@ var require_c = __commonJS((exports, module) => {
         TYPES,
         C_LINE_COMMENT_MODE,
         hljs.C_BLOCK_COMMENT_MODE,
-        PREPROCESSOR
+        ...PREPROCESSORS
       ]
     };
     return {
@@ -7963,7 +8005,7 @@ var require_c = __commonJS((exports, module) => {
       disableAutodetect: true,
       illegal: "</",
       contains: [].concat(EXPRESSION_CONTEXT, FUNCTION_DECLARATION, EXPRESSION_CONTAINS, [
-        PREPROCESSOR,
+        ...PREPROCESSORS,
         {
           begin: hljs.IDENT_RE + "::",
           keywords: KEYWORDS
@@ -7989,7 +8031,7 @@ var require_c = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/cal.js
-var require_cal = __commonJS((exports, module) => {
+var require_cal = __commonJS(function(exports, module) {
   function cal(hljs) {
     const regex = hljs.regex;
     const KEYWORDS = [
@@ -8131,7 +8173,7 @@ var require_cal = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/capnproto.js
-var require_capnproto = __commonJS((exports, module) => {
+var require_capnproto = __commonJS(function(exports, module) {
   function capnproto(hljs) {
     const KEYWORDS = [
       "struct",
@@ -8224,7 +8266,7 @@ var require_capnproto = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/ceylon.js
-var require_ceylon = __commonJS((exports, module) => {
+var require_ceylon = __commonJS(function(exports, module) {
   function ceylon(hljs) {
     const KEYWORDS = [
       "assembly",
@@ -8350,7 +8392,7 @@ var require_ceylon = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/clean.js
-var require_clean = __commonJS((exports, module) => {
+var require_clean = __commonJS(function(exports, module) {
   function clean(hljs) {
     const KEYWORDS = [
       "if",
@@ -8411,7 +8453,7 @@ var require_clean = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/clojure.js
-var require_clojure = __commonJS((exports, module) => {
+var require_clojure = __commonJS(function(exports, module) {
   function clojure(hljs) {
     const SYMBOLSTART = "a-zA-Z_\\-!.?+*=<>&'";
     const SYMBOL_RE = "[#]?[" + SYMBOLSTART + "][" + SYMBOLSTART + "0-9/;:$#]*";
@@ -8551,7 +8593,7 @@ var require_clojure = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/clojure-repl.js
-var require_clojure_repl = __commonJS((exports, module) => {
+var require_clojure_repl = __commonJS(function(exports, module) {
   function clojureRepl(hljs) {
     return {
       name: "Clojure REPL",
@@ -8571,13 +8613,13 @@ var require_clojure_repl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/cmake.js
-var require_cmake = __commonJS((exports, module) => {
+var require_cmake = __commonJS(function(exports, module) {
   function cmake(hljs) {
     return {
       name: "CMake",
       aliases: ["cmake.in"],
       case_insensitive: true,
-      keywords: { keyword: "break cmake_host_system_information cmake_minimum_required cmake_parse_arguments " + "cmake_policy configure_file continue elseif else endforeach endfunction endif endmacro " + "endwhile execute_process file find_file find_library find_package find_path " + "find_program foreach function get_cmake_property get_directory_property " + "get_filename_component get_property if include include_guard list macro " + "mark_as_advanced math message option return separate_arguments " + "set_directory_properties set_property set site_name string unset variable_watch while " + "add_compile_definitions add_compile_options add_custom_command add_custom_target " + "add_definitions add_dependencies add_executable add_library add_link_options " + "add_subdirectory add_test aux_source_directory build_command create_test_sourcelist " + "define_property enable_language enable_testing export fltk_wrap_ui " + "get_source_file_property get_target_property get_test_property include_directories " + "include_external_msproject include_regular_expression install link_directories " + "link_libraries load_cache project qt_wrap_cpp qt_wrap_ui remove_definitions " + "set_source_files_properties set_target_properties set_tests_properties source_group " + "target_compile_definitions target_compile_features target_compile_options " + "target_include_directories target_link_directories target_link_libraries " + "target_link_options target_sources try_compile try_run " + "ctest_build ctest_configure ctest_coverage ctest_empty_binary_directory ctest_memcheck " + "ctest_read_custom_files ctest_run_script ctest_sleep ctest_start ctest_submit " + "ctest_test ctest_update ctest_upload " + "build_name exec_program export_library_dependencies install_files install_programs " + "install_targets load_command make_directory output_required_files remove " + "subdir_depends subdirs use_mangled_mesa utility_source variable_requires write_file " + "qt5_use_modules qt5_use_package qt5_wrap_cpp " + "on off true false and or not command policy target test exists is_newer_than " + "is_directory is_symlink is_absolute matches less greater equal less_equal " + "greater_equal strless strgreater strequal strless_equal strgreater_equal version_less " + "version_greater version_equal version_less_equal version_greater_equal in_list defined" },
+      keywords: { keyword: "block break cmake_host_system_information cmake_minimum_required cmake_parse_arguments " + "cmake_policy configure_file continue elseif else endblock endforeach endfunction endif endmacro " + "endwhile execute_process file find_file find_library find_package find_path " + "find_program foreach function get_cmake_property get_directory_property " + "get_filename_component get_property if include include_guard list macro " + "mark_as_advanced math message option return separate_arguments " + "set_directory_properties set_property set site_name string unset variable_watch while " + "add_compile_definitions add_compile_options add_custom_command add_custom_target " + "add_definitions add_dependencies add_executable add_library add_link_options " + "add_subdirectory add_test aux_source_directory build_command create_test_sourcelist " + "define_property enable_language enable_testing export fltk_wrap_ui " + "get_source_file_property get_target_property get_test_property include_directories " + "include_external_msproject include_regular_expression install link_directories " + "link_libraries load_cache project qt_wrap_cpp qt_wrap_ui remove_definitions " + "set_source_files_properties set_target_properties set_tests_properties source_group " + "target_compile_definitions target_compile_features target_compile_options " + "target_include_directories target_link_directories target_link_libraries " + "target_link_options target_sources try_compile try_run " + "ctest_build ctest_configure ctest_coverage ctest_empty_binary_directory ctest_memcheck " + "ctest_read_custom_files ctest_run_script ctest_sleep ctest_start ctest_submit " + "ctest_test ctest_update ctest_upload " + "build_name exec_program export_library_dependencies install_files install_programs " + "install_targets load_command make_directory output_required_files remove " + "subdir_depends subdirs use_mangled_mesa utility_source variable_requires write_file " + "qt5_use_modules qt5_use_package qt5_wrap_cpp " + "on off true false and or not command policy target test exists is_newer_than " + "is_directory is_symlink is_absolute matches less greater equal less_equal " + "greater_equal strless strgreater strequal strless_equal strgreater_equal version_less " + "version_greater version_equal version_less_equal version_greater_equal in_list defined" },
       contains: [
         {
           className: "variable",
@@ -8587,7 +8629,11 @@ var require_cmake = __commonJS((exports, module) => {
         hljs.COMMENT(/#\[\[/, /]]/),
         hljs.HASH_COMMENT_MODE,
         hljs.QUOTE_STRING_MODE,
-        hljs.NUMBER_MODE
+        {
+          scope: "number",
+          begin: /\b\d+(\.\d+)?\b/,
+          relevance: 0
+        }
       ]
     };
   }
@@ -8595,7 +8641,7 @@ var require_cmake = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/coffeescript.js
-var require_coffeescript = __commonJS((exports, module) => {
+var require_coffeescript = __commonJS(function(exports, module) {
   var KEYWORDS = [
     "as",
     "in",
@@ -8922,7 +8968,7 @@ var require_coffeescript = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/coq.js
-var require_coq = __commonJS((exports, module) => {
+var require_coq = __commonJS(function(exports, module) {
   function coq(hljs) {
     const KEYWORDS = [
       "_|0",
@@ -9363,7 +9409,7 @@ var require_coq = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/cos.js
-var require_cos = __commonJS((exports, module) => {
+var require_cos = __commonJS(function(exports, module) {
   function cos(hljs) {
     const STRINGS = {
       className: "string",
@@ -9448,7 +9494,7 @@ var require_cos = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/cpp.js
-var require_cpp = __commonJS((exports, module) => {
+var require_cpp = __commonJS(function(exports, module) {
   function cpp(hljs) {
     const regex = hljs.regex;
     const C_LINE_COMMENT_MODE = hljs.COMMENT("//", "$", { contains: [{ begin: /\\\n/ }] });
@@ -9476,8 +9522,8 @@ var require_cpp = __commonJS((exports, module) => {
           illegal: "."
         },
         hljs.END_SAME_AS_BEGIN({
-          begin: /(?:u8?|U|L)?R"([^()\\ ]{0,16})\(/,
-          end: /\)([^()\\ ]{0,16})"/
+          begin: /(?:u8?|U|L)?R"([^()\\\s"]{0,16})\(/,
+          end: /\)([^()\\\s"]{0,16})"/
         })
       ]
     };
@@ -9485,13 +9531,31 @@ var require_cpp = __commonJS((exports, module) => {
       className: "number",
       variants: [
         {
-          begin: "[+-]?(?:" + "(?:" + "[0-9](?:'?[0-9])*\\.(?:[0-9](?:'?[0-9])*)?" + "|\\.[0-9](?:'?[0-9])*" + ")(?:[Ee][+-]?[0-9](?:'?[0-9])*)?" + "|[0-9](?:'?[0-9])*[Ee][+-]?[0-9](?:'?[0-9])*" + "|0[Xx](?:" + "[0-9A-Fa-f](?:'?[0-9A-Fa-f])*(?:\\.(?:[0-9A-Fa-f](?:'?[0-9A-Fa-f])*)?)?" + "|\\.[0-9A-Fa-f](?:'?[0-9A-Fa-f])*" + ")[Pp][+-]?[0-9](?:'?[0-9])*" + ")(?:" + "[Ff](?:16|32|64|128)?" + "|(BF|bf)16" + "|[Ll]" + "|" + ")"
+          begin: "[+-]?(?:" + "(?:" + "\\b[0-9](?:'?[0-9])*\\.(?:[0-9](?:'?[0-9])*)?" + "|\\.[0-9](?:'?[0-9])*" + ")(?:[Ee][+-]?[0-9](?:'?[0-9])*)?" + "|\\b[0-9](?:'?[0-9])*[Ee][+-]?[0-9](?:'?[0-9])*" + "|\\b0[Xx](?:" + "[0-9A-Fa-f](?:'?[0-9A-Fa-f])*(?:\\.(?:[0-9A-Fa-f](?:'?[0-9A-Fa-f])*)?)?" + "|\\.[0-9A-Fa-f](?:'?[0-9A-Fa-f])*" + ")[Pp][+-]?[0-9](?:'?[0-9])*" + ")(?:" + "[Ff](?:16|32|64|128)?" + "|(BF|bf)16" + "|[Ll]" + "|" + ")"
         },
         {
           begin: "[+-]?\\b(?:" + "0[Bb][01](?:'?[01])*" + "|0[Xx][0-9A-Fa-f](?:'?[0-9A-Fa-f])*" + "|0(?:'?[0-7])*" + "|[1-9](?:'?[0-9])*" + ")(?:" + "[Uu](?:LL?|ll?)" + "|[Uu][Zz]?" + "|(?:LL?|ll?)[Uu]?" + "|[Zz][Uu]" + "|" + ")"
         }
       ],
       relevance: 0
+    };
+    const PREPROCESSOR_INCLUDE = {
+      scope: "meta",
+      begin: /#\s*include\b/,
+      end: /$/,
+      keywords: { keyword: "include" },
+      contains: [
+        {
+          begin: /\\\n/
+        },
+        STRINGS,
+        {
+          scope: "string",
+          begin: /<.*?>/
+        },
+        C_LINE_COMMENT_MODE,
+        hljs.C_BLOCK_COMMENT_MODE
+      ]
     };
     const PREPROCESSOR = {
       className: "meta",
@@ -9504,20 +9568,21 @@ var require_cpp = __commonJS((exports, module) => {
           relevance: 0
         },
         hljs.inherit(STRINGS, { className: "string" }),
-        {
-          className: "string",
-          begin: /<.*?>/
-        },
         C_LINE_COMMENT_MODE,
         hljs.C_BLOCK_COMMENT_MODE
       ]
     };
+    const PREPROCESSORS = [
+      PREPROCESSOR_INCLUDE,
+      PREPROCESSOR
+    ];
     const TITLE_MODE = {
       className: "title",
       begin: regex.optional(NAMESPACE_RE) + hljs.IDENT_RE,
       relevance: 0
     };
     const FUNCTION_TITLE = regex.optional(NAMESPACE_RE) + hljs.IDENT_RE + "\\s*\\(";
+    const MAX_FUNCTION_TYPE_TOKENS = 12;
     const RESERVED_KEYWORDS = [
       "alignas",
       "alignof",
@@ -9807,11 +9872,11 @@ var require_cpp = __commonJS((exports, module) => {
       keywords: {
         _hint: FUNCTION_HINTS
       },
-      begin: regex.concat(/\b/, /(?!decltype)/, /(?!if)/, /(?!for)/, /(?!switch)/, /(?!while)/, hljs.IDENT_RE, regex.lookahead(/(<[^<>]+>|)\s*\(/))
+      begin: regex.concat(/\b/, `(?!${RESERVED_KEYWORDS.join("|")})`, hljs.IDENT_RE, regex.lookahead(/(<[^<>]+>|)\s*\(/))
     };
     const EXPRESSION_CONTAINS = [
       FUNCTION_DISPATCH,
-      PREPROCESSOR,
+      ...PREPROCESSORS,
       CPP_PRIMITIVE_TYPES,
       C_LINE_COMMENT_MODE,
       hljs.C_BLOCK_COMMENT_MODE,
@@ -9847,7 +9912,7 @@ var require_cpp = __commonJS((exports, module) => {
     };
     const FUNCTION_DECLARATION = {
       className: "function",
-      begin: "(" + FUNCTION_TYPE_RE + "[\\*&\\s]+)+" + FUNCTION_TITLE,
+      begin: "(" + FUNCTION_TYPE_RE + "[\\*&\\s]+){1," + MAX_FUNCTION_TYPE_TOKENS + "}" + FUNCTION_TITLE,
       returnBegin: true,
       end: /[{;=]/,
       excludeEnd: true,
@@ -9912,7 +9977,7 @@ var require_cpp = __commonJS((exports, module) => {
         CPP_PRIMITIVE_TYPES,
         C_LINE_COMMENT_MODE,
         hljs.C_BLOCK_COMMENT_MODE,
-        PREPROCESSOR
+        ...PREPROCESSORS
       ]
     };
     return {
@@ -9930,7 +9995,7 @@ var require_cpp = __commonJS((exports, module) => {
       illegal: "</",
       classNameAliases: { "function.dispatch": "built_in" },
       contains: [].concat(EXPRESSION_CONTEXT, FUNCTION_DECLARATION, FUNCTION_DISPATCH, EXPRESSION_CONTAINS, [
-        PREPROCESSOR,
+        ...PREPROCESSORS,
         {
           begin: "\\b(deque|list|queue|priority_queue|pair|stack|vector|map|set|bitset|multiset|multimap|unordered_map|unordered_set|unordered_multiset|unordered_multimap|array|tuple|optional|variant|function|flat_map|flat_set)\\s*<(?!<)",
           end: ">",
@@ -9962,7 +10027,7 @@ var require_cpp = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/crmsh.js
-var require_crmsh = __commonJS((exports, module) => {
+var require_crmsh = __commonJS(function(exports, module) {
   function crmsh(hljs) {
     const RESOURCES = "primitive rsc_template";
     const COMMANDS = "group clone ms master location colocation order fencing_topology " + "rsc_ticket acl_target acl_group user role " + "tag xml";
@@ -10051,7 +10116,7 @@ var require_crmsh = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/crystal.js
-var require_crystal = __commonJS((exports, module) => {
+var require_crystal = __commonJS(function(exports, module) {
   function crystal(hljs) {
     const INT_SUFFIX = "(_?[ui](8|16|32|64|128))?";
     const FLOAT_SUFFIX = "(_?f(32|64))?";
@@ -10191,16 +10256,8 @@ var require_crystal = __commonJS((exports, module) => {
             hljs.BACKSLASH_ESCAPE,
             SUBST
           ],
-          variants: [
-            {
-              begin: "//[a-z]*",
-              relevance: 0
-            },
-            {
-              begin: "/(?!\\/)",
-              end: "/[a-z]*"
-            }
-          ]
+          begin: "/(?!\\/)",
+          end: "/[a-z]*"
         }
       ],
       relevance: 0
@@ -10245,11 +10302,16 @@ var require_crystal = __commonJS((exports, module) => {
       end: "\\]",
       contains: [hljs.inherit(hljs.QUOTE_STRING_MODE, { className: "string" })]
     };
+    const INTEGER_DIVISION = {
+      begin: /\/\/=?/,
+      relevance: 0
+    };
     const CRYSTAL_DEFAULT_CONTAINS = [
       EXPANSION,
       STRING,
       Q_STRING,
       REGEXP2,
+      INTEGER_DIVISION,
       REGEXP,
       ATTRIBUTE,
       VARIABLE,
@@ -10349,7 +10411,7 @@ var require_crystal = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/csharp.js
-var require_csharp = __commonJS((exports, module) => {
+var require_csharp = __commonJS(function(exports, module) {
   function csharp(hljs) {
     const BUILT_IN_KEYWORDS = [
       "bool",
@@ -10503,12 +10565,15 @@ var require_csharp = __commonJS((exports, module) => {
       literal: LITERAL_KEYWORDS
     };
     const TITLE_MODE = hljs.inherit(hljs.TITLE_MODE, { begin: "[a-zA-Z](\\.?\\w)*" });
+    const DIGITS = "\\d(_*\\d)*";
+    const INTEGER_SUFFIX = "([uU][lL]?|[lL][uU]?)?";
+    const REAL_SUFFIX = "([fFdDmM]|[uU][lL]?|[lL][uU]?)?";
     const NUMBERS = {
       className: "number",
       variants: [
-        { begin: "\\b(0b[01']+)" },
-        { begin: "(-?)\\b([\\d']+(\\.[\\d']*)?|\\.[\\d']+)(u|U|l|L|ul|UL|f|F|b|B)" },
-        { begin: "(-?)(\\b0[xX][a-fA-F0-9']+|(\\b[\\d']+(\\.[\\d']*)?|\\.[\\d']+)([eE][-+]?[\\d']+)?)" }
+        { begin: "\\b0[bB]_*[01](_*[01])*" + INTEGER_SUFFIX },
+        { begin: "(-?)\\b0[xX]_*[a-fA-F0-9](_*[a-fA-F0-9])*" + INTEGER_SUFFIX },
+        { begin: "(-?)(\\b" + DIGITS + "(\\.(" + DIGITS + ")?)?|\\." + DIGITS + ")([eE][-+]?" + DIGITS + ")?" + REAL_SUFFIX }
       ],
       relevance: 0
     };
@@ -10742,13 +10807,14 @@ var require_csharp = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/csp.js
-var require_csp = __commonJS((exports, module) => {
+var require_csp = __commonJS(function(exports, module) {
   function csp(hljs) {
     const KEYWORDS = [
       "base-uri",
       "child-src",
       "connect-src",
       "default-src",
+      "fenced-frame-src",
       "font-src",
       "form-action",
       "frame-ancestors",
@@ -10758,10 +10824,16 @@ var require_csp = __commonJS((exports, module) => {
       "media-src",
       "object-src",
       "plugin-types",
+      "report-to",
       "report-uri",
+      "require-trusted-types-for",
       "sandbox",
       "script-src",
+      "script-src-attr",
+      "script-src-elem",
       "style-src",
+      "style-src-attr",
+      "style-src-elem",
       "trusted-types",
       "unsafe-hashes",
       "worker-src"
@@ -10792,7 +10864,7 @@ var require_csp = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/css.js
-var require_css = __commonJS((exports, module) => {
+var require_css = __commonJS(function(exports, module) {
   var MODES = (hljs) => {
     return {
       IMPORTANT: {
@@ -10803,6 +10875,10 @@ var require_css = __commonJS((exports, module) => {
       HEXCOLOR: {
         scope: "number",
         begin: /#(([0-9a-fA-F]{3,4})|(([0-9a-fA-F]{2}){3,4}))\b/
+      },
+      UNICODE_RANGE: {
+        scope: "number",
+        begin: /\b[Uu]\+[0-9A-Fa-f][0-9A-Fa-f?]{0,5}(-[0-9A-Fa-f][0-9A-Fa-f]{0,5})?/
       },
       FUNCTION_DISPATCH: {
         className: "built_in",
@@ -11216,6 +11292,11 @@ var require_css = __commonJS((exports, module) => {
     "container-type",
     "content",
     "content-visibility",
+    "corner-bottom-left-shape",
+    "corner-bottom-right-shape",
+    "corner-shape",
+    "corner-top-left-shape",
+    "corner-top-right-shape",
     "counter-increment",
     "counter-reset",
     "counter-set",
@@ -11551,6 +11632,7 @@ var require_css = __commonJS((exports, module) => {
     "transition-timing-function",
     "translate",
     "unicode-bidi",
+    "unicode-range",
     "user-modify",
     "user-select",
     "vector-effect",
@@ -11637,6 +11719,7 @@ var require_css = __commonJS((exports, module) => {
             modes.HEXCOLOR,
             modes.IMPORTANT,
             modes.CSS_NUMBER_MODE,
+            modes.UNICODE_RANGE,
             ...STRINGS,
             {
               begin: /(url|data-uri)\(/,
@@ -11698,7 +11781,7 @@ var require_css = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/d.js
-var require_d = __commonJS((exports, module) => {
+var require_d = __commonJS(function(exports, module) {
   function d(hljs) {
     const D_KEYWORDS = {
       $pattern: hljs.UNDERSCORE_IDENT_RE,
@@ -11809,7 +11892,7 @@ var require_d = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/markdown.js
-var require_markdown = __commonJS((exports, module) => {
+var require_markdown = __commonJS(function(exports, module) {
   function markdown(hljs) {
     const regex = hljs.regex;
     const INLINE_HTML = {
@@ -11818,10 +11901,7 @@ var require_markdown = __commonJS((exports, module) => {
       subLanguage: "xml",
       relevance: 0
     };
-    const HORIZONTAL_RULE = {
-      begin: "^[-\\*]{3,}",
-      end: "$"
-    };
+    const HORIZONTAL_RULE = { match: /^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/ };
     const CODE = {
       className: "code",
       variants: [
@@ -12016,11 +12096,11 @@ var require_markdown = __commonJS((exports, module) => {
         HEADER,
         INLINE_HTML,
         LIST,
+        HORIZONTAL_RULE,
         BOLD,
         ITALIC,
         BLOCKQUOTE,
         CODE,
-        HORIZONTAL_RULE,
         LINK,
         LINK_REFERENCE,
         ENTITY
@@ -12031,8 +12111,9 @@ var require_markdown = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/dart.js
-var require_dart = __commonJS((exports, module) => {
+var require_dart = __commonJS(function(exports, module) {
   function dart(hljs) {
+    const regex = hljs.regex;
     const SUBST = {
       className: "subst",
       variants: [{ begin: "\\$[A-Za-z0-9_]+" }]
@@ -12231,6 +12312,15 @@ var require_dart = __commonJS((exports, module) => {
       ]),
       $pattern: /[A-Za-z][A-Za-z0-9_]*\??/
     };
+    const CLASS_NAME_RE = regex.concat(/\b_?/, regex.either(/(?:[A-Z]+[a-z0-9]+)+/, /(?:[A-Z]+[a-z0-9]+)+[A-Z]+/), /(?![A-Za-z0-9_])/);
+    const CLASS_REFERENCE = {
+      match: CLASS_NAME_RE,
+      scope: "title.class"
+    };
+    const FUNCTION_REFERENCE = {
+      match: /\b(?!(?:assert|catch|for|if|switch|while)\b)[a-z_][A-Za-z0-9_]*(?=\()/,
+      scope: "title.function"
+    };
     return {
       name: "Dart",
       keywords: KEYWORDS,
@@ -12260,13 +12350,12 @@ var require_dart = __commonJS((exports, module) => {
             hljs.UNDERSCORE_TITLE_MODE
           ]
         },
+        CLASS_REFERENCE,
+        FUNCTION_REFERENCE,
         NUMBER,
         {
           className: "meta",
           begin: "@[A-Za-z]+"
-        },
-        {
-          begin: "=>"
         }
       ]
     };
@@ -12275,7 +12364,7 @@ var require_dart = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/delphi.js
-var require_delphi = __commonJS((exports, module) => {
+var require_delphi = __commonJS(function(exports, module) {
   function delphi(hljs) {
     const KEYWORDS = [
       "exports",
@@ -12516,7 +12605,7 @@ var require_delphi = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/diff.js
-var require_diff = __commonJS((exports, module) => {
+var require_diff = __commonJS(function(exports, module) {
   function diff(hljs) {
     const regex = hljs.regex;
     return {
@@ -12526,7 +12615,7 @@ var require_diff = __commonJS((exports, module) => {
         {
           className: "meta",
           relevance: 10,
-          match: regex.either(/^@@ +-\d+,\d+ +\+\d+,\d+ +@@/, /^\*\*\* +\d+,\d+ +\*\*\*\*$/, /^--- +\d+,\d+ +----$/)
+          match: regex.either(/^@@ +-\d+,\d+ +\+\d+,\d+ +@@/, /^@@ +-\d+ +\+\d+,\d+ +@@/, /^@@ +-\d+,\d+ +\+\d+ +@@/, /^@@ +-\d+ +\+\d+ +@@/, /^\*\*\* +\d+,\d+ +\*\*\*\*$/, /^--- +\d+,\d+ +----$/)
         },
         {
           className: "comment",
@@ -12560,7 +12649,7 @@ var require_diff = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/django.js
-var require_django = __commonJS((exports, module) => {
+var require_django = __commonJS(function(exports, module) {
   function django(hljs) {
     const FILTER = {
       begin: /\|[A-Za-z]+:?/,
@@ -12609,10 +12698,9 @@ var require_django = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/dns.js
-var require_dns = __commonJS((exports, module) => {
+var require_dns = __commonJS(function(exports, module) {
   function dns(hljs) {
     const KEYWORDS = [
-      "IN",
       "A",
       "AAAA",
       "AFSDB",
@@ -12651,26 +12739,75 @@ var require_dns = __commonJS((exports, module) => {
       "TSIG",
       "TXT"
     ];
+    const ESCAPE_RE = /\\(?:\d{3}|[^\d\n])/;
+    const ESCAPE = {
+      scope: "char.escape",
+      match: ESCAPE_RE
+    };
+    const PUNCTUATION = {
+      scope: "punctuation",
+      match: /[()]/
+    };
+    const STRING = {
+      scope: "string",
+      begin: /"/,
+      end: /"/,
+      illegal: /\n/,
+      contains: [ESCAPE]
+    };
+    const CAA_PROPERTY_TAG = /\b(?:issuewild|issue|iodef|contactemail|contactphone|issuevmc|issuemail)\b/;
     return {
       name: "DNS Zone",
       aliases: [
         "bind",
         "zone"
       ],
+      case_insensitive: true,
       keywords: KEYWORDS,
       contains: [
         hljs.COMMENT(";", "$", { relevance: 0 }),
         {
+          match: [
+            /\bCAA\b/,
+            /[ \t]+/,
+            /\d+/,
+            /[ \t]+/,
+            CAA_PROPERTY_TAG
+          ],
+          scope: {
+            1: "keyword",
+            3: "number",
+            5: "attr"
+          }
+        },
+        STRING,
+        {
+          match: [
+            /\bTXT\b/,
+            /\s+/,
+            /(?!")(?:\\(?:\d{3}|[^\d\n])|[^\s;"()\\])+/
+          ],
+          scope: {
+            1: "keyword",
+            3: "string"
+          }
+        },
+        {
           className: "meta",
           begin: /^\$(TTL|GENERATE|INCLUDE|ORIGIN)\b/
         },
+        PUNCTUATION,
         {
-          className: "number",
-          begin: "((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}))|:)))\\b"
+          scope: "type",
+          match: /\b(?:IN|CH|HS)\b/
         },
         {
           className: "number",
-          begin: "((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]).){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\b"
+          begin: /(?:(?:[0-9A-Fa-f]{1,4}:){7}(?:[0-9A-Fa-f]{1,4}|:)|(?:[0-9A-Fa-f]{1,4}:){6}(?::[0-9A-Fa-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:)|(?:[0-9A-Fa-f]{1,4}:){5}(?:(?::[0-9A-Fa-f]{1,4}){1,2}|:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:)|(?:[0-9A-Fa-f]{1,4}:){4}(?:(?::[0-9A-Fa-f]{1,4}){1,3}|(?::[0-9A-Fa-f]{1,4})?:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:)|(?:[0-9A-Fa-f]{1,4}:){3}(?:(?::[0-9A-Fa-f]{1,4}){1,4}|(?::[0-9A-Fa-f]{1,4}){0,2}:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:)|(?:[0-9A-Fa-f]{1,4}:){2}(?:(?::[0-9A-Fa-f]{1,4}){1,5}|(?::[0-9A-Fa-f]{1,4}){0,3}:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:)|(?:[0-9A-Fa-f]{1,4}:)(?:(?::[0-9A-Fa-f]{1,4}){1,6}|(?::[0-9A-Fa-f]{1,4}){0,4}:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:)|(?::(?:(?::[0-9A-Fa-f]{1,4}){1,7}|(?::[0-9A-Fa-f]{1,4}){0,5}:(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:)))(?![0-9A-Fa-f:])/
+        },
+        {
+          className: "number",
+          begin: /(?:(?:25[0-5]|(?:2[0-4]|1?\d)?\d)\.){3}(?:25[0-5]|(?:2[0-4]|1?\d)?\d)\b/
         },
         hljs.inherit(hljs.NUMBER_MODE, { begin: /\b\d+[dhwm]?/ })
       ]
@@ -12680,7 +12817,7 @@ var require_dns = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/dockerfile.js
-var require_dockerfile = __commonJS((exports, module) => {
+var require_dockerfile = __commonJS(function(exports, module) {
   function dockerfile(hljs) {
     const KEYWORDS = [
       "from",
@@ -12717,13 +12854,11 @@ var require_dockerfile = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/dos.js
-var require_dos = __commonJS((exports, module) => {
+var require_dos = __commonJS(function(exports, module) {
   function dos(hljs) {
     const COMMENT = hljs.COMMENT(/^\s*@?rem\b/, /$/, { relevance: 10 });
     const LABEL = {
-      className: "symbol",
-      begin: "^\\s*[A-Za-z._?][A-Za-z0-9_$#@~.?]*(:|\\s+label)",
-      relevance: 0
+      begin: "^\\s*[A-Za-z._?][A-Za-z0-9_$#@~.?]*(:|\\s+label)"
     };
     const KEYWORDS = [
       "if",
@@ -12839,6 +12974,7 @@ var require_dos = __commonJS((exports, module) => {
       name: "Batch file (DOS)",
       aliases: [
         "bat",
+        "batch",
         "cmd"
       ],
       case_insensitive: true,
@@ -12874,7 +13010,7 @@ var require_dos = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/dsconfig.js
-var require_dsconfig = __commonJS((exports, module) => {
+var require_dsconfig = __commonJS(function(exports, module) {
   function dsconfig(hljs) {
     const QUOTED_PROPERTY = {
       className: "string",
@@ -12934,7 +13070,7 @@ var require_dsconfig = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/dts.js
-var require_dts = __commonJS((exports, module) => {
+var require_dts = __commonJS(function(exports, module) {
   function dts(hljs) {
     const STRINGS = {
       className: "string",
@@ -13071,7 +13207,7 @@ var require_dts = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/dust.js
-var require_dust = __commonJS((exports, module) => {
+var require_dust = __commonJS(function(exports, module) {
   function dust(hljs) {
     const EXPRESSION_KEYWORDS = "if eq ne lt lte gt gte select default math sep";
     return {
@@ -13111,7 +13247,7 @@ var require_dust = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/ebnf.js
-var require_ebnf = __commonJS((exports, module) => {
+var require_ebnf = __commonJS(function(exports, module) {
   function ebnf(hljs) {
     const commentMode = hljs.COMMENT(/\(\*/, /\*\)/);
     const nonTerminalMode = {
@@ -13155,7 +13291,7 @@ var require_ebnf = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/elixir.js
-var require_elixir = __commonJS((exports, module) => {
+var require_elixir = __commonJS(function(exports, module) {
   function elixir(hljs) {
     const regex = hljs.regex;
     const ELIXIR_IDENT_RE = "[a-zA-Z_][a-zA-Z0-9_.]*(!|\\?)?";
@@ -13169,6 +13305,7 @@ var require_elixir = __commonJS((exports, module) => {
       "cond",
       "defstruct",
       "defguard",
+      "defguardp",
       "do",
       "else",
       "end",
@@ -13360,7 +13497,13 @@ var require_elixir = __commonJS((exports, module) => {
       beginKeywords: "defimpl defmodule defprotocol defrecord",
       end: /\bdo\b|$|;/
     });
+    const CHAR_LITERAL = {
+      scope: "string",
+      match: /\?'/,
+      relevance: 0
+    };
     const ELIXIR_DEFAULT_CONTAINS = [
+      CHAR_LITERAL,
       STRING,
       REGEX_SIGIL,
       UPCASE_SIGIL,
@@ -13409,7 +13552,7 @@ var require_elixir = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/elm.js
-var require_elm = __commonJS((exports, module) => {
+var require_elm = __commonJS(function(exports, module) {
   function elm(hljs) {
     const COMMENT = { variants: [
       hljs.COMMENT("--", "$"),
@@ -13532,7 +13675,7 @@ var require_elm = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/ruby.js
-var require_ruby = __commonJS((exports, module) => {
+var require_ruby = __commonJS(function(exports, module) {
   function ruby(hljs) {
     const regex = hljs.regex;
     const RUBY_METHOD_RE = "([a-zA-Z_]\\w*[!?=]?|[-+~]@|<<|>>|=~|===?|<=>|[<>]=?|\\*\\*|[-/+%^&*~`|]|\\[\\]=?)";
@@ -13809,7 +13952,7 @@ var require_ruby = __commonJS((exports, module) => {
       CLASS_REFERENCE,
       METHOD_DEFINITION,
       {
-        begin: hljs.IDENT_RE + "::"
+        begin: "::"
       },
       {
         className: "symbol",
@@ -13919,7 +14062,7 @@ var require_ruby = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/erb.js
-var require_erb = __commonJS((exports, module) => {
+var require_erb = __commonJS(function(exports, module) {
   function erb(hljs) {
     return {
       name: "ERB",
@@ -13940,7 +14083,7 @@ var require_erb = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/erlang-repl.js
-var require_erlang_repl = __commonJS((exports, module) => {
+var require_erlang_repl = __commonJS(function(exports, module) {
   function erlangRepl(hljs) {
     const regex = hljs.regex;
     return {
@@ -13982,7 +14125,7 @@ var require_erlang_repl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/erlang.js
-var require_erlang = __commonJS((exports, module) => {
+var require_erlang = __commonJS(function(exports, module) {
   function erlang(hljs) {
     const BASIC_ATOM_RE = "[a-z'][a-zA-Z0-9_']*";
     const FUNCTION_NAME_RE = "(" + BASIC_ATOM_RE + ":" + BASIC_ATOM_RE + "|" + BASIC_ATOM_RE + ")";
@@ -14198,7 +14341,7 @@ var require_erlang = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/excel.js
-var require_excel = __commonJS((exports, module) => {
+var require_excel = __commonJS(function(exports, module) {
   function excel(hljs) {
     const BUILT_INS = [
       "ABS",
@@ -14765,7 +14908,7 @@ var require_excel = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/fix.js
-var require_fix = __commonJS((exports, module) => {
+var require_fix = __commonJS(function(exports, module) {
   function fix(hljs) {
     return {
       name: "FIX",
@@ -14801,7 +14944,7 @@ var require_fix = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/flix.js
-var require_flix = __commonJS((exports, module) => {
+var require_flix = __commonJS(function(exports, module) {
   function flix(hljs) {
     const CHAR = {
       className: "string",
@@ -14871,7 +15014,7 @@ var require_flix = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/fortran.js
-var require_fortran = __commonJS((exports, module) => {
+var require_fortran = __commonJS(function(exports, module) {
   function fortran(hljs) {
     const regex = hljs.regex;
     const PARAMS = {
@@ -15430,8 +15573,104 @@ var require_fortran = __commonJS((exports, module) => {
   module.exports = fortran;
 });
 
+// node_modules/highlight.js/lib/languages/freedesktop.js
+var require_freedesktop = __commonJS(function(exports, module) {
+  function freedesktop(hljs) {
+    const regex = hljs.regex;
+    const FIELD_CODES = {
+      scope: "variable",
+      match: /%[a-zA-Z]/
+    };
+    const STRING = {
+      scope: "string",
+      begin: /"/,
+      end: /"/,
+      contains: [hljs.BACKSLASH_ESCAPE]
+    };
+    const COMMENT = {
+      scope: "comment",
+      begin: /#/,
+      end: /$/
+    };
+    const SECTIONS = [
+      "Desktop Entry",
+      "Unit",
+      "Service",
+      "Install",
+      "Socket",
+      "Mount",
+      "Automount",
+      "Swap",
+      "Path",
+      "Timer",
+      "Slice",
+      "Scope",
+      "Manager",
+      "connection",
+      "ipv4",
+      "wifi-security",
+      "wifi",
+      "ipv6",
+      "802-11-wireless-security",
+      "802-11-wireless",
+      "802-3-ethernet",
+      "vpn",
+      "Journal",
+      "Bridge",
+      "Desktop Action\\s+[A-Za-z0-9_-]+"
+    ];
+    SECTIONS.sort().reverse();
+    const SECTION = {
+      scope: "section",
+      begin: new RegExp("^\\[(" + SECTIONS.join("|") + ")\\]$")
+    };
+    const OPERATOR = {
+      scope: "operator",
+      match: /=/
+    };
+    const LITERALS = [
+      "Application",
+      "Link",
+      "Directory",
+      "forking",
+      "oneshot",
+      "OneShot",
+      "true",
+      "false",
+      "True",
+      "False"
+    ];
+    const LITERAL = {
+      scope: "literal",
+      match: new RegExp("\\b(" + LITERALS.join("|") + ")\\b")
+    };
+    const KEY_VALUE = {
+      begin: regex.concat(/^[A-Za-z0-9_-]+(\[[A-Za-z0-9_@.]+\])?/, regex.lookahead(/\s*=/)),
+      beginScope: "attr",
+      end: /$/,
+      contains: [
+        OPERATOR,
+        STRING,
+        LITERAL,
+        FIELD_CODES
+      ]
+    };
+    return {
+      name: "FreeDesktop config",
+      aliases: ["desktop", "systemd"],
+      case_insensitive: false,
+      contains: [
+        COMMENT,
+        SECTION,
+        KEY_VALUE
+      ]
+    };
+  }
+  module.exports = freedesktop;
+});
+
 // node_modules/highlight.js/lib/languages/fsharp.js
-var require_fsharp = __commonJS((exports, module) => {
+var require_fsharp = __commonJS(function(exports, module) {
   function escape(value) {
     return new RegExp(value.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&"), "m");
   }
@@ -15463,6 +15702,7 @@ var require_fsharp = __commonJS((exports, module) => {
     const joined = "(" + (opts.capture ? "" : "?:") + args.map((x) => source(x)).join("|") + ")";
     return joined;
   }
+  new RegExp(either(/\[(?:[^\\\]]|\\.)*\]/, /\(\?<(?![=!])[^>]+>/, /\(\?'[^']+'/, /\(\??/, /\\([1-9][0-9]*)/, /\\./));
   function fsharp(hljs) {
     const KEYWORDS = [
       "abstract",
@@ -15902,7 +16142,7 @@ var require_fsharp = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/gams.js
-var require_gams = __commonJS((exports, module) => {
+var require_gams = __commonJS(function(exports, module) {
   function gams(hljs) {
     const regex = hljs.regex;
     const KEYWORDS = {
@@ -16045,7 +16285,7 @@ var require_gams = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/gauss.js
-var require_gauss = __commonJS((exports, module) => {
+var require_gauss = __commonJS(function(exports, module) {
   function gauss(hljs) {
     const KEYWORDS = {
       keyword: "bool break call callexe checkinterrupt clear clearg closeall cls comlog compile " + "continue create debug declare delete disable dlibrary dllcall do dos ed edit else " + "elseif enable end endfor endif endp endo errorlog errorlogat expr external fn " + "for format goto gosub graph if keyword let lib library line load loadarray loadexe " + "loadf loadk loadm loadp loads loadx local locate loopnextindex lprint lpwidth lshow " + "matrix msym ndpclex new open output outwidth plot plotsym pop prcsn print " + "printdos proc push retp return rndcon rndmod rndmult rndseed run save saveall screen " + "scroll setarray show sparse stop string struct system trace trap threadfor " + "threadendfor threadbegin threadjoin threadstat threadend until use while winprint " + "ne ge le gt lt and xor or not eq eqv",
@@ -16223,7 +16463,7 @@ var require_gauss = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/gcode.js
-var require_gcode = __commonJS((exports, module) => {
+var require_gcode = __commonJS(function(exports, module) {
   function gcode(hljs) {
     const regex = hljs.regex;
     const GCODE_KEYWORDS = {
@@ -16369,44 +16609,101 @@ var require_gcode = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/gherkin.js
-var require_gherkin = __commonJS((exports, module) => {
+var require_gherkin = __commonJS(function(exports, module) {
+  var VARIABLE = {
+    scope: "variable",
+    begin: /<[^>\s]+>/
+  };
+  var LINE_START = /^[ \t]*/;
   function gherkin(hljs) {
+    const STEP_KEYWORDS = {
+      begin: [
+        LINE_START,
+        /\b(?:Given|When|Then|And|But)\b/
+      ],
+      beginScope: {
+        2: "keyword"
+      },
+      end: /$/,
+      contains: [
+        VARIABLE,
+        hljs.QUOTE_STRING_MODE
+      ]
+    };
+    const STAR_STEP = {
+      begin: [
+        LINE_START,
+        /\*(?=[ \t])/
+      ],
+      beginScope: {
+        2: "keyword"
+      },
+      end: /$/,
+      contains: [
+        VARIABLE,
+        hljs.QUOTE_STRING_MODE
+      ]
+    };
     return {
       name: "Gherkin",
       aliases: ["feature"],
-      keywords: "Feature Background Ability Business Need Scenario Scenarios Scenario Outline Scenario Template Examples Given And Then But When",
       contains: [
         {
-          className: "symbol",
-          begin: "\\*",
-          relevance: 0
+          scope: "comment",
+          begin: /^[ \t]*#/,
+          end: /$/
         },
         {
-          className: "meta",
-          begin: "@[^@\\s]+"
+          begin: [
+            LINE_START,
+            /@[^@\s]+(?:[ \t]+@[^@\s]+)*/
+          ],
+          beginScope: {
+            2: "meta"
+          }
         },
         {
-          begin: "\\|",
-          end: "\\|\\w*$",
-          contains: [
+          scope: "string",
+          variants: [
             {
-              className: "string",
-              begin: "[^|]+"
+              begin: /^[ \t]*"""\w*/,
+              end: /^[ \t]*"""[ \t]*$/
+            },
+            {
+              begin: /^[ \t]*```\w*/,
+              end: /^[ \t]*```[ \t]*$/
             }
           ]
         },
         {
-          className: "variable",
-          begin: "<",
-          end: ">"
+          begin: [
+            LINE_START,
+            /(Feature|Business Need|Ability|Rule|Examples?|Scenario(?:s| Outline| Template)?|Background)/,
+            /:/
+          ],
+          beginScope: {
+            2: "keyword",
+            3: "punctuation"
+          },
+          end: /$/,
+          contains: [
+            VARIABLE,
+            hljs.QUOTE_STRING_MODE
+          ]
         },
-        hljs.HASH_COMMENT_MODE,
+        STEP_KEYWORDS,
+        STAR_STEP,
         {
-          className: "string",
-          begin: '"""',
-          end: '"""'
-        },
-        hljs.QUOTE_STRING_MODE
+          begin: /^[ \t]*\|/,
+          end: /$/,
+          contains: [
+            VARIABLE,
+            {
+              scope: "string",
+              match: /[^|<\n]+/
+            }
+          ]
+        }
       ]
     };
   }
@@ -16414,7 +16711,7 @@ var require_gherkin = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/glsl.js
-var require_glsl = __commonJS((exports, module) => {
+var require_glsl = __commonJS(function(exports, module) {
   function glsl(hljs) {
     return {
       name: "GLSL",
@@ -16441,7 +16738,7 @@ var require_glsl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/gml.js
-var require_gml = __commonJS((exports, module) => {
+var require_gml = __commonJS(function(exports, module) {
   function gml(hljs) {
     const KEYWORDS = [
       "#endregion",
@@ -19566,7 +19863,7 @@ var require_gml = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/go.js
-var require_go = __commonJS((exports, module) => {
+var require_go = __commonJS(function(exports, module) {
   function go(hljs) {
     const LITERALS = [
       "true",
@@ -19681,6 +19978,10 @@ var require_go = __commonJS((exports, module) => {
               relevance: 0
             },
             {
+              match: /-?\b0[bB](_?[01])*i?/,
+              relevance: 0
+            },
+            {
               match: /-?\.\d(_?\d)*([eE][+-]?\d(_?\d)*)?i?/,
               relevance: 0
             },
@@ -19717,7 +20018,7 @@ var require_go = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/golo.js
-var require_golo = __commonJS((exports, module) => {
+var require_golo = __commonJS(function(exports, module) {
   function golo(hljs) {
     const KEYWORDS = [
       "println",
@@ -19792,7 +20093,7 @@ var require_golo = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/gradle.js
-var require_gradle = __commonJS((exports, module) => {
+var require_gradle = __commonJS(function(exports, module) {
   function gradle(hljs) {
     const KEYWORDS = [
       "task",
@@ -19976,7 +20277,7 @@ var require_gradle = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/graphql.js
-var require_graphql = __commonJS((exports, module) => {
+var require_graphql = __commonJS(function(exports, module) {
   function graphql(hljs) {
     const regex = hljs.regex;
     const GQL_NAME = /[_A-Za-z][_0-9A-Za-z]*/;
@@ -20049,9 +20350,27 @@ var require_graphql = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/groovy.js
-var require_groovy = __commonJS((exports, module) => {
-  function variants(variants2, obj = {}) {
-    obj.variants = variants2;
+var require_groovy = __commonJS(function(exports, module) {
+  var decimalDigits = "[0-9](_*[0-9])*";
+  var frac = `\\.(${decimalDigits})`;
+  var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
+  var NUMERIC = {
+    className: "number",
+    variants: [
+      { begin: `(\\b(${decimalDigits})((${frac})|\\.)?|(${frac}))` + `[eE][+-]?(${decimalDigits})[fFdD]?\\b` },
+      { begin: `\\b(${decimalDigits})((${frac})[fFdD]?\\b|\\.([fFdD]\\b)?)` },
+      { begin: `(${frac})[fFdD]?\\b` },
+      { begin: `\\b(${decimalDigits})[fFdD]\\b` },
+      { begin: `\\b0[xX]((${hexDigits})\\.?|(${hexDigits})?\\.(${hexDigits}))` + `[pP][+-]?(${decimalDigits})[fFdD]?\\b` },
+      { begin: "\\b(0|[1-9](_*[0-9])*)[lL]?\\b" },
+      { begin: `\\b0[xX](${hexDigits})[lL]?\\b` },
+      { begin: "\\b0(_*[0-7])*[lL]?\\b" },
+      { begin: "\\b0[bB][01](_*[01])*[lL]?\\b" }
+    ],
+    relevance: 0
+  };
+  function variants(variants, obj = {}) {
+    obj.variants = variants;
     return obj;
   }
   function groovy(hljs) {
@@ -20079,10 +20398,7 @@ var require_groovy = __commonJS((exports, module) => {
       begin: /~?\/[^\/\n]+\//,
       contains: [hljs.BACKSLASH_ESCAPE]
     };
-    const NUMBER = variants([
-      hljs.BINARY_NUMBER_MODE,
-      hljs.C_NUMBER_MODE
-    ]);
+    const NUMBER = NUMERIC;
     const STRING = variants([
       {
         begin: /"""/,
@@ -20218,7 +20534,7 @@ var require_groovy = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/haml.js
-var require_haml = __commonJS((exports, module) => {
+var require_haml = __commonJS(function(exports, module) {
   function haml(hljs) {
     return {
       name: "HAML",
@@ -20320,7 +20636,7 @@ var require_haml = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/handlebars.js
-var require_handlebars = __commonJS((exports, module) => {
+var require_handlebars = __commonJS(function(exports, module) {
   function handlebars(hljs) {
     const regex = hljs.regex;
     const BUILT_INS = {
@@ -20521,7 +20837,7 @@ var require_handlebars = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/haskell.js
-var require_haskell = __commonJS((exports, module) => {
+var require_haskell = __commonJS(function(exports, module) {
   function haskell(hljs) {
     const decimalDigits = "([0-9]_*)+";
     const hexDigits = "([0-9a-fA-F]_*)+";
@@ -20621,7 +20937,7 @@ var require_haskell = __commonJS((exports, module) => {
           className: "class",
           begin: "\\b(data|(new)?type)\\b",
           end: "$",
-          keywords: "data family type newtype deriving",
+          keywords: "data family type newtype deriving where",
           contains: [
             PRAGMA,
             CONSTRUCTOR,
@@ -20691,7 +21007,7 @@ var require_haskell = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/haxe.js
-var require_haxe = __commonJS((exports, module) => {
+var require_haxe = __commonJS(function(exports, module) {
   function haxe(hljs) {
     const IDENT_RE = "[a-zA-Z_$][a-zA-Z0-9_$]*";
     const HAXE_NUMBER_RE = /(-?)(\b0[xX][a-fA-F0-9_]+|(\b\d+(\.[\d_]*)?|\.[\d_]+)(([eE][-+]?\d+)|i32|u32|i64|f64)?)/;
@@ -20843,7 +21159,7 @@ var require_haxe = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/hsp.js
-var require_hsp = __commonJS((exports, module) => {
+var require_hsp = __commonJS(function(exports, module) {
   function hsp(hljs) {
     return {
       name: "HSP",
@@ -20890,7 +21206,7 @@ var require_hsp = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/http.js
-var require_http = __commonJS((exports, module) => {
+var require_http = __commonJS(function(exports, module) {
   function http(hljs) {
     const regex = hljs.regex;
     const VERSION = "HTTP/([32]|1\\.[01])";
@@ -20978,7 +21294,7 @@ var require_http = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/hy.js
-var require_hy = __commonJS((exports, module) => {
+var require_hy = __commonJS(function(exports, module) {
   function hy(hljs) {
     const SYMBOLSTART = "a-zA-Z_\\-!.?+*=<>&#'";
     const SYMBOL_RE = "[" + SYMBOLSTART + "][" + SYMBOLSTART + "0-9/;:]*";
@@ -21072,7 +21388,7 @@ var require_hy = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/inform7.js
-var require_inform7 = __commonJS((exports, module) => {
+var require_inform7 = __commonJS(function(exports, module) {
   function inform7(hljs) {
     const START_BRACKET = "\\[";
     const END_BRACKET = "\\]";
@@ -21125,7 +21441,7 @@ var require_inform7 = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/ini.js
-var require_ini = __commonJS((exports, module) => {
+var require_ini = __commonJS(function(exports, module) {
   function ini(hljs) {
     const regex = hljs.regex;
     const NUMBERS = {
@@ -21234,7 +21550,7 @@ var require_ini = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/irpf90.js
-var require_irpf90 = __commonJS((exports, module) => {
+var require_irpf90 = __commonJS(function(exports, module) {
   function irpf90(hljs) {
     const regex = hljs.regex;
     const PARAMS = {
@@ -21291,7 +21607,7 @@ var require_irpf90 = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/isbl.js
-var require_isbl = __commonJS((exports, module) => {
+var require_isbl = __commonJS(function(exports, module) {
   function isbl(hljs) {
     const UNDERSCORE_IDENT_RE = "[A-Za-zА-Яа-яёЁ_!][A-Za-zА-Яа-яёЁ_0-9]*";
     const FUNCTION_NAME_IDENT_RE = "[A-Za-zА-Яа-яёЁ_][A-Za-zА-Яа-яёЁ_0-9]*";
@@ -21551,7 +21867,7 @@ var require_isbl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/java.js
-var require_java = __commonJS((exports, module) => {
+var require_java = __commonJS(function(exports, module) {
   var decimalDigits = "[0-9](_*[0-9])*";
   var frac = `\\.(${decimalDigits})`;
   var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -21580,7 +21896,11 @@ var require_java = __commonJS((exports, module) => {
   function java(hljs) {
     const regex = hljs.regex;
     const JAVA_IDENT_RE = "[À-ʸa-zA-Z_$][À-ʸa-zA-Z_$0-9]*";
-    const GENERIC_IDENT_RE = JAVA_IDENT_RE + recurRegex("(?:<" + JAVA_IDENT_RE + "~~~(?:\\s*,\\s*" + JAVA_IDENT_RE + "~~~)*>)?", /~~~/g, 2);
+    const ARRAY_BRACKETS_OPTIONAL_RE = "(?:(?:\\s*\\[\\s*])+)?";
+    const SIMPLE_TYPE_RE = JAVA_IDENT_RE + "<@@@>" + ARRAY_BRACKETS_OPTIONAL_RE;
+    const WILDCARD_TYPE_RE = "\\?(?:\\s+(?:extends|super)\\s+" + SIMPLE_TYPE_RE + ")?";
+    const TYPE_ARG_RE = "(?:" + WILDCARD_TYPE_RE + "|" + SIMPLE_TYPE_RE + ")";
+    const TYPE_ARGS_OPTIONAL_RE = recurRegex("(?:\\s*<\\s*" + TYPE_ARG_RE + "(?:\\s*,\\s*" + TYPE_ARG_RE + ")*\\s*>)?", /<@@@>/g, 2);
     const MAIN_KEYWORDS = [
       "synchronized",
       "abstract",
@@ -21722,17 +22042,22 @@ var require_java = __commonJS((exports, module) => {
           scope: "keyword"
         },
         {
+          beginKeywords: "new throw return else yield assert",
+          relevance: 0
+        },
+        {
           begin: [
-            regex.concat(/(?!else)/, JAVA_IDENT_RE),
-            /\s+/,
             JAVA_IDENT_RE,
-            /\s+/,
+            regex.concat(TYPE_ARGS_OPTIONAL_RE, ARRAY_BRACKETS_OPTIONAL_RE, /\s+/),
+            JAVA_IDENT_RE,
+            ARRAY_BRACKETS_OPTIONAL_RE,
+            /\s*/,
             /=(?!=)/
           ],
           className: {
             1: "type",
             3: "variable",
-            5: "operator"
+            6: "operator"
           }
         },
         {
@@ -21752,16 +22077,16 @@ var require_java = __commonJS((exports, module) => {
           ]
         },
         {
-          beginKeywords: "new throw return else",
-          relevance: 0
-        },
-        {
           begin: [
-            "(?:" + GENERIC_IDENT_RE + "\\s+)",
-            hljs.UNDERSCORE_IDENT_RE,
+            JAVA_IDENT_RE,
+            regex.concat(TYPE_ARGS_OPTIONAL_RE, ARRAY_BRACKETS_OPTIONAL_RE, /\s+/),
+            JAVA_IDENT_RE,
             /\s*(?=\()/
           ],
-          className: { 2: "title.function" },
+          className: {
+            1: "type",
+            3: "title.function"
+          },
           keywords: KEYWORDS,
           contains: [
             {
@@ -21791,7 +22116,7 @@ var require_java = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/javascript.js
-var require_javascript = __commonJS((exports, module) => {
+var require_javascript = __commonJS(function(exports, module) {
   var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
   var KEYWORDS = [
     "as",
@@ -21922,6 +22247,7 @@ var require_javascript = __commonJS((exports, module) => {
     "localStorage",
     "sessionStorage",
     "module",
+    "self",
     "global"
   ];
   var BUILT_INS = [].concat(BUILT_IN_GLOBALS, TYPES, ERROR_TYPES);
@@ -22208,7 +22534,8 @@ var require_javascript = __commonJS((exports, module) => {
       match: regex.concat(/\b/, noneOf([
         ...BUILT_IN_GLOBALS,
         "super",
-        "import"
+        "import",
+        "await"
       ].map((x) => `${x}\\s*\\(`)), IDENT_RE$1, regex.lookahead(/\s*\(/)),
       className: "title.function",
       relevance: 0
@@ -22264,7 +22591,7 @@ var require_javascript = __commonJS((exports, module) => {
       aliases: ["js", "jsx", "mjs", "cjs"],
       keywords: KEYWORDS$1,
       exports: { PARAMS_CONTAINS, CLASS_REFERENCE },
-      illegal: /#(?![$_A-z])/,
+      illegal: /#(?![$_A-Za-z])/,
       contains: [
         hljs.SHEBANG({
           label: "shebang",
@@ -22396,7 +22723,7 @@ var require_javascript = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/jboss-cli.js
-var require_jboss_cli = __commonJS((exports, module) => {
+var require_jboss_cli = __commonJS(function(exports, module) {
   function jbossCli(hljs) {
     const PARAM = {
       begin: /[\w-]+ *=/,
@@ -22451,11 +22778,17 @@ var require_jboss_cli = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/json.js
-var require_json = __commonJS((exports, module) => {
+var require_json = __commonJS(function(exports, module) {
+  var EXTENDED_NUMBER_RE = "([-+]?)(\\b0[xX][a-fA-F0-9]+|(\\b\\d+(\\.\\d*)?|\\.\\d+)([eE][-+]?\\d+)?)|NaN|[-+]?Infinity";
+  var EXTENDED_NUMBER_MODE = {
+    scope: "number",
+    match: EXTENDED_NUMBER_RE,
+    relevance: 0
+  };
   function json(hljs) {
     const ATTRIBUTE = {
       className: "attr",
-      begin: /"(\\.|[^\\"\r\n])*"(?=\s*:)/,
+      begin: /(("(\\.|[^\\"\r\n])*")|('(\\.|[^\\'\r\n])*'))(?=\s*:)/,
       relevance: 1.01
     };
     const PUNCTUATION = {
@@ -22474,16 +22807,17 @@ var require_json = __commonJS((exports, module) => {
     };
     return {
       name: "JSON",
-      aliases: ["jsonc"],
+      aliases: ["jsonc", "json5"],
       keywords: {
         literal: LITERALS
       },
       contains: [
         ATTRIBUTE,
         PUNCTUATION,
+        hljs.APOS_STRING_MODE,
         hljs.QUOTE_STRING_MODE,
         LITERALS_MODE,
-        hljs.C_NUMBER_MODE,
+        EXTENDED_NUMBER_MODE,
         hljs.C_LINE_COMMENT_MODE,
         hljs.C_BLOCK_COMMENT_MODE
       ],
@@ -22494,7 +22828,7 @@ var require_json = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/julia.js
-var require_julia = __commonJS((exports, module) => {
+var require_julia = __commonJS(function(exports, module) {
   function julia(hljs) {
     const VARIABLE_NAME_RE = "[A-Za-z_\\u00A1-\\uFFFF][A-Za-z_0-9\\u00A1-\\uFFFF]*";
     const KEYWORD_LIST = [
@@ -22858,7 +23192,7 @@ var require_julia = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/julia-repl.js
-var require_julia_repl = __commonJS((exports, module) => {
+var require_julia_repl = __commonJS(function(exports, module) {
   function juliaRepl(hljs) {
     return {
       name: "Julia REPL",
@@ -22880,7 +23214,7 @@ var require_julia_repl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/kotlin.js
-var require_kotlin = __commonJS((exports, module) => {
+var require_kotlin = __commonJS(function(exports, module) {
   var decimalDigits = "[0-9](_*[0-9])*";
   var frac = `\\.(${decimalDigits})`;
   var hexDigits = "[0-9a-fA-F](_*[0-9a-fA-F])*";
@@ -22997,7 +23331,9 @@ var require_kotlin = __commonJS((exports, module) => {
       name: "Kotlin",
       aliases: [
         "kt",
-        "kts"
+        "kts",
+        "ktm",
+        "ktx"
       ],
       keywords: KEYWORDS,
       contains: [
@@ -23119,7 +23455,7 @@ var require_kotlin = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/lasso.js
-var require_lasso = __commonJS((exports, module) => {
+var require_lasso = __commonJS(function(exports, module) {
   function lasso(hljs) {
     const LASSO_IDENT_RE = "[a-zA-Z_][\\w.]*";
     const LASSO_ANGLE_RE = "<\\?(lasso(script)?|=)";
@@ -23260,7 +23596,7 @@ var require_lasso = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/latex.js
-var require_latex = __commonJS((exports, module) => {
+var require_latex = __commonJS(function(exports, module) {
   function latex(hljs) {
     const regex = hljs.regex;
     const KNOWN_CONTROL_WORDS = regex.either(...[
@@ -23508,7 +23844,7 @@ var require_latex = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/ldif.js
-var require_ldif = __commonJS((exports, module) => {
+var require_ldif = __commonJS(function(exports, module) {
   function ldif(hljs) {
     return {
       name: "LDIF",
@@ -23534,8 +23870,9 @@ var require_ldif = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/leaf.js
-var require_leaf = __commonJS((exports, module) => {
+var require_leaf = __commonJS(function(exports, module) {
   function leaf(hljs) {
+    const regex = hljs.regex;
     const IDENT = /([A-Za-z_][A-Za-z_0-9]*)?/;
     const LITERALS = [
       "true",
@@ -23556,7 +23893,7 @@ var require_leaf = __commonJS((exports, module) => {
         },
         {
           scope: "keyword",
-          match: LITERALS.join("|")
+          match: `\\b${regex.either(...LITERALS)}\\b`
         },
         {
           scope: "variable",
@@ -23623,7 +23960,7 @@ var require_leaf = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/less.js
-var require_less = __commonJS((exports, module) => {
+var require_less = __commonJS(function(exports, module) {
   var MODES = (hljs) => {
     return {
       IMPORTANT: {
@@ -23634,6 +23971,10 @@ var require_less = __commonJS((exports, module) => {
       HEXCOLOR: {
         scope: "number",
         begin: /#(([0-9a-fA-F]{3,4})|(([0-9a-fA-F]{2}){3,4}))\b/
+      },
+      UNICODE_RANGE: {
+        scope: "number",
+        begin: /\b[Uu]\+[0-9A-Fa-f][0-9A-Fa-f?]{0,5}(-[0-9A-Fa-f][0-9A-Fa-f]{0,5})?/
       },
       FUNCTION_DISPATCH: {
         className: "built_in",
@@ -24047,6 +24388,11 @@ var require_less = __commonJS((exports, module) => {
     "container-type",
     "content",
     "content-visibility",
+    "corner-bottom-left-shape",
+    "corner-bottom-right-shape",
+    "corner-shape",
+    "corner-top-left-shape",
+    "corner-top-right-shape",
     "counter-increment",
     "counter-reset",
     "counter-set",
@@ -24382,6 +24728,7 @@ var require_less = __commonJS((exports, module) => {
     "transition-timing-function",
     "translate",
     "unicode-bidi",
+    "unicode-range",
     "user-modify",
     "user-select",
     "vector-effect",
@@ -24455,7 +24802,7 @@ var require_less = __commonJS((exports, module) => {
         end: "[\\)\\n]",
         excludeEnd: true
       }
-    }, modes.HEXCOLOR, PARENS_MODE, IDENT_MODE("variable", "@@?" + IDENT_RE, 10), IDENT_MODE("variable", "@\\{" + IDENT_RE + "\\}"), IDENT_MODE("built_in", "~?`[^`]*?`"), {
+    }, modes.UNICODE_RANGE, modes.HEXCOLOR, PARENS_MODE, IDENT_MODE("variable", "@@?" + IDENT_RE, 10), IDENT_MODE("variable", "@\\{" + IDENT_RE + "\\}"), IDENT_MODE("built_in", "~?`[^`]*?`"), {
       className: "attribute",
       begin: IDENT_RE + "\\s*:",
       end: ":",
@@ -24585,7 +24932,7 @@ var require_less = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/lisp.js
-var require_lisp = __commonJS((exports, module) => {
+var require_lisp = __commonJS(function(exports, module) {
   function lisp(hljs) {
     const LISP_IDENT_RE = "[a-zA-Z_\\-+\\*\\/<=>&#][a-zA-Z0-9_\\-+*\\/<=>&#!]*";
     const MEC_RE = "\\|[^]*?\\|";
@@ -24613,8 +24960,8 @@ var require_lisp = __commonJS((exports, module) => {
     const STRING = hljs.inherit(hljs.QUOTE_STRING_MODE, { illegal: null });
     const COMMENT = hljs.COMMENT(";", "$", { relevance: 0 });
     const VARIABLE = {
-      begin: "\\*",
-      end: "\\*"
+      scope: "variable",
+      match: /\*[^\s()*]+\*/
     };
     const KEYWORD = {
       className: "symbol",
@@ -24716,7 +25063,7 @@ var require_lisp = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/livecodeserver.js
-var require_livecodeserver = __commonJS((exports, module) => {
+var require_livecodeserver = __commonJS(function(exports, module) {
   function livecodeserver(hljs) {
     const VARIABLE = {
       className: "variable",
@@ -24813,7 +25160,7 @@ var require_livecodeserver = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/livescript.js
-var require_livescript = __commonJS((exports, module) => {
+var require_livescript = __commonJS(function(exports, module) {
   var KEYWORDS = [
     "as",
     "in",
@@ -25152,7 +25499,7 @@ var require_livescript = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/llvm.js
-var require_llvm = __commonJS((exports, module) => {
+var require_llvm = __commonJS(function(exports, module) {
   function llvm(hljs) {
     const regex = hljs.regex;
     const IDENT_RE = /([-a-zA-Z$._][\w$.-]*)/;
@@ -25213,6 +25560,7 @@ var require_llvm = __commonJS((exports, module) => {
         TYPE,
         hljs.COMMENT(/;\s*$/, null, { relevance: 0 }),
         hljs.COMMENT(/;/, /$/),
+        hljs.C_BLOCK_COMMENT_MODE,
         {
           className: "string",
           begin: /"/,
@@ -25237,7 +25585,7 @@ var require_llvm = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/lsl.js
-var require_lsl = __commonJS((exports, module) => {
+var require_lsl = __commonJS(function(exports, module) {
   function lsl(hljs) {
     const LSL_STRING_ESCAPE_CHARS = {
       className: "subst",
@@ -25303,7 +25651,7 @@ var require_lsl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/lua.js
-var require_lua = __commonJS((exports, module) => {
+var require_lua = __commonJS(function(exports, module) {
   function lua(hljs) {
     const OPENING_LONG_BRACKET = "\\[=*\\[";
     const CLOSING_LONG_BRACKET = "\\]=*\\]";
@@ -25325,7 +25673,7 @@ var require_lua = __commonJS((exports, module) => {
       keywords: {
         $pattern: hljs.UNDERSCORE_IDENT_RE,
         literal: "true false nil",
-        keyword: "and break do else elseif end for goto if in local not or repeat return then until while",
+        keyword: "and break do else elseif end for goto if in local global not or repeat return then until while",
         built_in: "_G _ENV _VERSION __index __newindex __mode __call __metatable __tostring __len " + "__gc __add __sub __mul __div __mod __pow __concat __unm __eq __lt __le assert " + "collectgarbage dofile error getfenv getmetatable ipairs load loadfile loadstring " + "module next pairs pcall print rawequal rawget rawset require select setfenv " + "setmetatable tonumber tostring type unpack xpcall arg self " + "coroutine resume yield status wrap create running debug getupvalue " + "debug sethook getmetatable gethook setmetatable setlocal traceback setfenv getinfo setupvalue getlocal getregistry getfenv " + "io lines write close flush open output type read stderr stdin input stdout popen tmpfile " + "math log max acos huge ldexp pi cos tanh pow deg tan cosh sinh random randomseed frexp ceil floor rad abs sqrt modf asin min mod fmod log10 atan2 exp sin atan " + "os exit setlocale date getenv difftime remove time clock tmpname rename execute package preload loadlib loaded loaders cpath config path seeall " + "string sub upper len gfind rep find match char dump gmatch reverse byte format gsub lower " + "table setn insert getn foreachi maxn foreach concat sort remove"
       },
       contains: COMMENTS.concat([
@@ -25360,7 +25708,7 @@ var require_lua = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/makefile.js
-var require_makefile = __commonJS((exports, module) => {
+var require_makefile = __commonJS(function(exports, module) {
   function makefile(hljs) {
     const VARIABLE = {
       className: "variable",
@@ -25433,7 +25781,7 @@ var require_makefile = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/mathematica.js
-var require_mathematica = __commonJS((exports, module) => {
+var require_mathematica = __commonJS(function(exports, module) {
   var SYSTEM_SYMBOLS = [
     "AASTriangle",
     "AbelianGroup",
@@ -32764,7 +33112,7 @@ var require_mathematica = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/matlab.js
-var require_matlab = __commonJS((exports, module) => {
+var require_matlab = __commonJS(function(exports, module) {
   function matlab(hljs) {
     const TRANSPOSE_RE = "('|\\.')+";
     const TRANSPOSE = {
@@ -32843,7 +33191,7 @@ var require_matlab = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/maxima.js
-var require_maxima = __commonJS((exports, module) => {
+var require_maxima = __commonJS(function(exports, module) {
   function maxima(hljs) {
     const KEYWORDS = "if then else elseif for thru do while unless step in and or not";
     const LITERALS = "true false unknown inf minf ind und %e %i %pi %phi %gamma";
@@ -32893,7 +33241,7 @@ var require_maxima = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/mel.js
-var require_mel = __commonJS((exports, module) => {
+var require_mel = __commonJS(function(exports, module) {
   function mel(hljs) {
     return {
       name: "MEL",
@@ -32921,7 +33269,7 @@ var require_mel = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/mercury.js
-var require_mercury = __commonJS((exports, module) => {
+var require_mercury = __commonJS(function(exports, module) {
   function mercury(hljs) {
     const KEYWORDS = {
       keyword: "module use_module import_module include_module end_module initialise " + "mutable initialize finalize finalise interface implementation pred " + "mode func type inst solver any_pred any_func is semidet det nondet " + "multi erroneous failure cc_nondet cc_multi typeclass instance where " + "pragma promise external trace atomic or_else require_complete_switch " + "require_det require_semidet require_multi require_nondet " + "require_cc_multi require_cc_nondet require_erroneous require_failure",
@@ -32997,7 +33345,7 @@ var require_mercury = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/mipsasm.js
-var require_mipsasm = __commonJS((exports, module) => {
+var require_mipsasm = __commonJS(function(exports, module) {
   function mipsasm(hljs) {
     return {
       name: "MIPS Assembly",
@@ -33065,7 +33413,7 @@ var require_mipsasm = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/mizar.js
-var require_mizar = __commonJS((exports, module) => {
+var require_mizar = __commonJS(function(exports, module) {
   function mizar(hljs) {
     return {
       name: "Mizar",
@@ -33077,7 +33425,7 @@ var require_mizar = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/perl.js
-var require_perl = __commonJS((exports, module) => {
+var require_perl = __commonJS(function(exports, module) {
   function perl(hljs) {
     const regex = hljs.regex;
     const KEYWORDS = [
@@ -33525,7 +33873,7 @@ var require_perl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/mojolicious.js
-var require_mojolicious = __commonJS((exports, module) => {
+var require_mojolicious = __commonJS(function(exports, module) {
   function mojolicious(hljs) {
     return {
       name: "Mojolicious",
@@ -33554,7 +33902,7 @@ var require_mojolicious = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/monkey.js
-var require_monkey = __commonJS((exports, module) => {
+var require_monkey = __commonJS(function(exports, module) {
   function monkey(hljs) {
     const NUMBER = {
       className: "number",
@@ -33727,7 +34075,7 @@ var require_monkey = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/moonscript.js
-var require_moonscript = __commonJS((exports, module) => {
+var require_moonscript = __commonJS(function(exports, module) {
   function moonscript(hljs) {
     const KEYWORDS = {
       keyword: "if then not for in while do return else elseif break continue switch and or " + "unless when class extends super local import export from using",
@@ -33851,7 +34199,7 @@ var require_moonscript = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/n1ql.js
-var require_n1ql = __commonJS((exports, module) => {
+var require_n1ql = __commonJS(function(exports, module) {
   function n1ql(hljs) {
     const KEYWORDS = [
       "all",
@@ -34205,7 +34553,7 @@ var require_n1ql = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/nestedtext.js
-var require_nestedtext = __commonJS((exports, module) => {
+var require_nestedtext = __commonJS(function(exports, module) {
   function nestedtext(hljs) {
     const NESTED = {
       match: [
@@ -34282,7 +34630,7 @@ var require_nestedtext = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/nginx.js
-var require_nginx = __commonJS((exports, module) => {
+var require_nginx = __commonJS(function(exports, module) {
   function nginx(hljs) {
     const regex = hljs.regex;
     const VAR = {
@@ -34422,7 +34770,7 @@ var require_nginx = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/nim.js
-var require_nim = __commonJS((exports, module) => {
+var require_nim = __commonJS(function(exports, module) {
   function nim(hljs) {
     const TYPES = [
       "int",
@@ -34605,7 +34953,7 @@ var require_nim = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/nix.js
-var require_nix = __commonJS((exports, module) => {
+var require_nix = __commonJS(function(exports, module) {
   function nix(hljs) {
     const regex = hljs.regex;
     const KEYWORDS = {
@@ -34949,7 +35297,7 @@ var require_nix = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/node-repl.js
-var require_node_repl = __commonJS((exports, module) => {
+var require_node_repl = __commonJS(function(exports, module) {
   function nodeRepl(hljs) {
     return {
       name: "Node REPL",
@@ -34975,7 +35323,7 @@ var require_node_repl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/nsis.js
-var require_nsis = __commonJS((exports, module) => {
+var require_nsis = __commonJS(function(exports, module) {
   function nsis(hljs) {
     const regex = hljs.regex;
     const LANGUAGE_CONSTANTS = [
@@ -35032,8 +35380,13 @@ var require_nsis = __commonJS((exports, module) => {
       "FILE_ATTRIBUTE_READONLY",
       "FILE_ATTRIBUTE_SYSTEM",
       "FILE_ATTRIBUTE_TEMPORARY",
+      "HKCC",
       "HKCR",
+      "HKCR32",
+      "HKCR64",
       "HKCU",
+      "HKCU32",
+      "HKCU64",
       "HKDD",
       "HKEY_CLASSES_ROOT",
       "HKEY_CURRENT_CONFIG",
@@ -35043,6 +35396,8 @@ var require_nsis = __commonJS((exports, module) => {
       "HKEY_PERFORMANCE_DATA",
       "HKEY_USERS",
       "HKLM",
+      "HKLM32",
+      "HKLM64",
       "HKPD",
       "HKU",
       "IDABORT",
@@ -35070,23 +35425,33 @@ var require_nsis = __commonJS((exports, module) => {
       "MB_TOPMOST",
       "MB_USERICON",
       "MB_YESNO",
-      "NORMAL",
+      "MB_YESNOCANCEL",
       "OFFLINE",
       "READONLY",
       "SHCTX",
       "SHELL_CONTEXT",
-      "SYSTEM|TEMPORARY"
+      "SW_HIDE",
+      "SW_SHOW",
+      "SW_SHOWMAXIMIZED",
+      "SW_SHOWMINIMIZED",
+      "SW_SHOWNORMAL"
     ];
     const COMPILER_FLAGS = [
       "addincludedir",
       "addplugindir",
       "appendfile",
+      "appendmemfile",
       "assert",
       "cd",
       "define",
       "delfile",
       "echo",
       "else",
+      "elseif",
+      "elseifdef",
+      "elseifmacrodef",
+      "elseifmacrondef",
+      "elseifndef",
       "endif",
       "error",
       "execute",
@@ -35102,8 +35467,10 @@ var require_nsis = __commonJS((exports, module) => {
       "insertmacro",
       "macro",
       "macroend",
+      "macroundef",
       "makensis",
       "packhdr",
+      "pragma",
       "searchparse",
       "searchreplace",
       "system",
@@ -35132,11 +35499,11 @@ var require_nsis = __commonJS((exports, module) => {
     };
     const PARAMETERS = {
       className: "params",
-      begin: regex.either(...PARAM_NAMES)
+      begin: regex.concat(regex.either(...PARAM_NAMES), /\b/)
     };
     const COMPILER = {
       className: "keyword",
-      begin: regex.concat(/!/, regex.either(...COMPILER_FLAGS))
+      begin: regex.concat(/!/, regex.either(...COMPILER_FLAGS), /\b/)
     };
     const ESCAPE_CHARS = {
       className: "char.escape",
@@ -35191,6 +35558,7 @@ var require_nsis = __commonJS((exports, module) => {
       "CompletedText",
       "ComponentText",
       "CopyFiles",
+      "CPU",
       "CRCCheck",
       "CreateDirectory",
       "CreateFont",
@@ -35246,12 +35614,15 @@ var require_nsis = __commonJS((exports, module) => {
       "GetInstDirError",
       "GetKnownFolderPath",
       "GetLabelAddress",
+      "GetRegView",
+      "GetShellVarContext",
       "GetTempFileName",
       "GetWinVer",
       "Goto",
       "HideWindow",
       "Icon",
       "IfAbort",
+      "IfAltRegView",
       "IfErrors",
       "IfFileExists",
       "IfRebootFlag",
@@ -35289,7 +35660,11 @@ var require_nsis = __commonJS((exports, module) => {
       "LockWindow",
       "LogSet",
       "LogText",
+      "ManifestAppendCustomString",
+      "ManifestDisableWindowFiltering",
       "ManifestDPIAware",
+      "ManifestDPIAwareness",
+      "ManifestGdiScaling",
       "ManifestLongPathAware",
       "ManifestMaxVersionTested",
       "ManifestSupportedOS",
@@ -35309,6 +35684,7 @@ var require_nsis = __commonJS((exports, module) => {
       "Quit",
       "ReadEnvStr",
       "ReadINIStr",
+      "ReadMemory",
       "ReadRegDWORD",
       "ReadRegStr",
       "Reboot",
@@ -35334,6 +35710,7 @@ var require_nsis = __commonJS((exports, module) => {
       "SetCompress",
       "SetCompressor",
       "SetCompressorDictSize",
+      "SetCompressionLevel",
       "SetCtlColors",
       "SetCurInstType",
       "SetDatablockOptimize",
@@ -35362,7 +35739,9 @@ var require_nsis = __commonJS((exports, module) => {
       "StrCpy",
       "StrLen",
       "SubCaption",
+      "Target",
       "Unicode",
+      "UnsafeStrCpy",
       "UninstallButtonText",
       "UninstallCaption",
       "UninstallIcon",
@@ -35478,7 +35857,7 @@ var require_nsis = __commonJS((exports, module) => {
         hljs.COMMENT(";", "$", { relevance: 0 }),
         VARIABLE_DEFINITION,
         FUNCTION_DEFINITION,
-        { beginKeywords: "Function PageEx Section SectionGroup FunctionEnd SectionEnd" },
+        { beginKeywords: "Function PageEx Section SectionGroup FunctionEnd PageExEnd SectionEnd SectionGroupEnd" },
         STRING,
         COMPILER,
         DEFINES,
@@ -35486,7 +35865,7 @@ var require_nsis = __commonJS((exports, module) => {
         LANGUAGES,
         PARAMETERS,
         PLUGINS,
-        hljs.NUMBER_MODE
+        hljs.C_NUMBER_MODE
       ]
     };
   }
@@ -35494,7 +35873,7 @@ var require_nsis = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/objectivec.js
-var require_objectivec = __commonJS((exports, module) => {
+var require_objectivec = __commonJS(function(exports, module) {
   function objectivec(hljs) {
     const API_CLASS = {
       className: "built_in",
@@ -35740,7 +36119,7 @@ var require_objectivec = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/ocaml.js
-var require_ocaml = __commonJS((exports, module) => {
+var require_ocaml = __commonJS(function(exports, module) {
   function ocaml(hljs) {
     return {
       name: "OCaml",
@@ -35796,7 +36175,7 @@ var require_ocaml = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/openscad.js
-var require_openscad = __commonJS((exports, module) => {
+var require_openscad = __commonJS(function(exports, module) {
   function openscad(hljs) {
     const SPECIAL_VARS = {
       className: "keyword",
@@ -35867,7 +36246,7 @@ var require_openscad = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/oxygene.js
-var require_oxygene = __commonJS((exports, module) => {
+var require_oxygene = __commonJS(function(exports, module) {
   function oxygene(hljs) {
     const OXYGENE_KEYWORDS = {
       $pattern: /\.?\w+/,
@@ -35931,7 +36310,7 @@ var require_oxygene = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/parser3.js
-var require_parser3 = __commonJS((exports, module) => {
+var require_parser3 = __commonJS(function(exports, module) {
   function parser3(hljs) {
     const CURLY_SUBCOMMENT = hljs.COMMENT(/\{/, /\}/, { contains: ["self"] });
     return {
@@ -35973,7 +36352,7 @@ var require_parser3 = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/pf.js
-var require_pf = __commonJS((exports, module) => {
+var require_pf = __commonJS(function(exports, module) {
   function pf(hljs) {
     const MACRO = {
       className: "variable",
@@ -36007,7 +36386,7 @@ var require_pf = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/pgsql.js
-var require_pgsql = __commonJS((exports, module) => {
+var require_pgsql = __commonJS(function(exports, module) {
   function pgsql(hljs) {
     const COMMENT_MODE = hljs.COMMENT("--", "$");
     const UNQUOTED_IDENT = "[a-zA-Z_][a-zA-Z_0-9$]*";
@@ -36232,7 +36611,7 @@ var require_pgsql = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/php.js
-var require_php = __commonJS((exports, module) => {
+var require_php = __commonJS(function(exports, module) {
   function php(hljs) {
     const regex = hljs.regex;
     const NOT_PERL_ETC = /(?![A-Za-z0-9])(?![$])/;
@@ -36587,6 +36966,8 @@ var require_php = __commonJS((exports, module) => {
         VARIABLE,
         LEFT_AND_RIGHT_SIDE_OF_DOUBLE_COLON,
         hljs.C_BLOCK_COMMENT_MODE,
+        hljs.C_LINE_COMMENT_MODE,
+        hljs.HASH_COMMENT_MODE,
         STRING,
         NUMBER,
         CONSTRUCTOR_CALL
@@ -36609,6 +36990,8 @@ var require_php = __commonJS((exports, module) => {
       NAMED_ARGUMENT,
       LEFT_AND_RIGHT_SIDE_OF_DOUBLE_COLON,
       hljs.C_BLOCK_COMMENT_MODE,
+      hljs.C_LINE_COMMENT_MODE,
+      hljs.HASH_COMMENT_MODE,
       STRING,
       NUMBER,
       CONSTRUCTOR_CALL
@@ -36726,6 +37109,8 @@ var require_php = __commonJS((exports, module) => {
                 VARIABLE,
                 LEFT_AND_RIGHT_SIDE_OF_DOUBLE_COLON,
                 hljs.C_BLOCK_COMMENT_MODE,
+                hljs.C_LINE_COMMENT_MODE,
+                hljs.HASH_COMMENT_MODE,
                 STRING,
                 NUMBER
               ]
@@ -36780,7 +37165,7 @@ var require_php = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/php-template.js
-var require_php_template = __commonJS((exports, module) => {
+var require_php_template = __commonJS(function(exports, module) {
   function phpTemplate(hljs) {
     return {
       name: "PHP template",
@@ -36827,7 +37212,7 @@ var require_php_template = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/plaintext.js
-var require_plaintext = __commonJS((exports, module) => {
+var require_plaintext = __commonJS(function(exports, module) {
   function plaintext(hljs) {
     return {
       name: "Plain text",
@@ -36842,7 +37227,7 @@ var require_plaintext = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/pony.js
-var require_pony = __commonJS((exports, module) => {
+var require_pony = __commonJS(function(exports, module) {
   function pony(hljs) {
     const KEYWORDS = {
       keyword: "actor addressof and as be break class compile_error compile_intrinsic " + "consume continue delegate digestof do else elseif embed end error " + "for fun if ifdef in interface is isnt lambda let match new not object " + "or primitive recover repeat return struct then trait try type until " + "use var where while with xor",
@@ -36901,7 +37286,7 @@ var require_pony = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/powershell.js
-var require_powershell = __commonJS((exports, module) => {
+var require_powershell = __commonJS(function(exports, module) {
   function powershell(hljs) {
     const TYPES = [
       "string",
@@ -37130,7 +37515,7 @@ var require_powershell = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/processing.js
-var require_processing = __commonJS((exports, module) => {
+var require_processing = __commonJS(function(exports, module) {
   function processing(hljs) {
     const regex = hljs.regex;
     const BUILT_INS = [
@@ -37555,7 +37940,7 @@ var require_processing = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/profile.js
-var require_profile = __commonJS((exports, module) => {
+var require_profile = __commonJS(function(exports, module) {
   function profile(hljs) {
     return {
       name: "Python profiler",
@@ -37595,7 +37980,7 @@ var require_profile = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/prolog.js
-var require_prolog = __commonJS((exports, module) => {
+var require_prolog = __commonJS(function(exports, module) {
   function prolog(hljs) {
     const ATOM = {
       begin: /[a-z][A-Za-z0-9_]*/,
@@ -37671,7 +38056,7 @@ var require_prolog = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/properties.js
-var require_properties = __commonJS((exports, module) => {
+var require_properties = __commonJS(function(exports, module) {
   function properties(hljs) {
     const WS0 = "[ \\t\\f]*";
     const WS1 = "[ \\t\\f]+";
@@ -37725,7 +38110,7 @@ var require_properties = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/protobuf.js
-var require_protobuf = __commonJS((exports, module) => {
+var require_protobuf = __commonJS(function(exports, module) {
   function protobuf(hljs) {
     const KEYWORDS = [
       "package",
@@ -37798,7 +38183,7 @@ var require_protobuf = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/puppet.js
-var require_puppet = __commonJS((exports, module) => {
+var require_puppet = __commonJS(function(exports, module) {
   function puppet(hljs) {
     const PUPPET_KEYWORDS = {
       keyword: "and case default else elsif false if in import enherits node or true undef unless main settings $string ",
@@ -37903,7 +38288,7 @@ var require_puppet = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/purebasic.js
-var require_purebasic = __commonJS((exports, module) => {
+var require_purebasic = __commonJS(function(exports, module) {
   function purebasic(hljs) {
     const STRINGS = {
       className: "string",
@@ -37952,7 +38337,7 @@ var require_purebasic = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/python.js
-var require_python = __commonJS((exports, module) => {
+var require_python = __commonJS(function(exports, module) {
   function python(hljs) {
     const regex = hljs.regex;
     const IDENT_RE = /[\p{XID_Start}_]\p{XID_Continue}*/u;
@@ -37980,6 +38365,7 @@ var require_python = __commonJS((exports, module) => {
       "in",
       "is",
       "lambda",
+      "lazy",
       "match",
       "nonlocal|10",
       "not",
@@ -37995,7 +38381,9 @@ var require_python = __commonJS((exports, module) => {
     const BUILT_INS = [
       "__import__",
       "abs",
+      "aiter",
       "all",
+      "anext",
       "any",
       "ascii",
       "bin",
@@ -38018,6 +38406,7 @@ var require_python = __commonJS((exports, module) => {
       "filter",
       "float",
       "format",
+      "frozendict",
       "frozenset",
       "getattr",
       "globals",
@@ -38050,6 +38439,7 @@ var require_python = __commonJS((exports, module) => {
       "repr",
       "reversed",
       "round",
+      "sentinel",
       "set",
       "setattr",
       "slice",
@@ -38131,7 +38521,7 @@ var require_python = __commonJS((exports, module) => {
           relevance: 10
         },
         {
-          begin: /([fF][rR]|[rR][fF]|[fF])'''/,
+          begin: /([fFtT][rR]|[rR][fFtT]|[fFtT])'''/,
           end: /'''/,
           contains: [
             hljs.BACKSLASH_ESCAPE,
@@ -38141,7 +38531,7 @@ var require_python = __commonJS((exports, module) => {
           ]
         },
         {
-          begin: /([fF][rR]|[rR][fF]|[fF])"""/,
+          begin: /([fFtT][rR]|[rR][fFtT]|[fFtT])"""/,
           end: /"""/,
           contains: [
             hljs.BACKSLASH_ESCAPE,
@@ -38169,7 +38559,7 @@ var require_python = __commonJS((exports, module) => {
           end: /"/
         },
         {
-          begin: /([fF][rR]|[rR][fF]|[fF])'/,
+          begin: /([fFtT][rR]|[rR][fFtT]|[fFtT])'/,
           end: /'/,
           contains: [
             hljs.BACKSLASH_ESCAPE,
@@ -38178,7 +38568,7 @@ var require_python = __commonJS((exports, module) => {
           ]
         },
         {
-          begin: /([fF][rR]|[rR][fF]|[fF])"/,
+          begin: /([fFtT][rR]|[rR][fFtT]|[fFtT])"/,
           end: /"/,
           contains: [
             hljs.BACKSLASH_ESCAPE,
@@ -38346,7 +38736,7 @@ var require_python = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/python-repl.js
-var require_python_repl = __commonJS((exports, module) => {
+var require_python_repl = __commonJS(function(exports, module) {
   function pythonRepl(hljs) {
     return {
       aliases: ["pycon"],
@@ -38372,7 +38762,7 @@ var require_python_repl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/q.js
-var require_q = __commonJS((exports, module) => {
+var require_q = __commonJS(function(exports, module) {
   function q(hljs) {
     const KEYWORDS = {
       $pattern: /(`?)[A-Za-z0-9_]+\b/,
@@ -38399,7 +38789,7 @@ var require_q = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/qml.js
-var require_qml = __commonJS((exports, module) => {
+var require_qml = __commonJS(function(exports, module) {
   function qml(hljs) {
     const regex = hljs.regex;
     const KEYWORDS = {
@@ -38546,7 +38936,7 @@ var require_qml = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/r.js
-var require_r = __commonJS((exports, module) => {
+var require_r = __commonJS(function(exports, module) {
   function r(hljs) {
     const regex = hljs.regex;
     const IDENT_RE = /(?:(?:[a-zA-Z]|\.[._a-zA-Z])[._a-zA-Z0-9]*)|\.(?!\d)/;
@@ -38712,7 +39102,7 @@ var require_r = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/reasonml.js
-var require_reasonml = __commonJS((exports, module) => {
+var require_reasonml = __commonJS(function(exports, module) {
   function reasonml(hljs) {
     const BUILT_IN_TYPES = [
       "array",
@@ -38849,7 +39239,7 @@ var require_reasonml = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/rib.js
-var require_rib = __commonJS((exports, module) => {
+var require_rib = __commonJS(function(exports, module) {
   function rib(hljs) {
     return {
       name: "RenderMan RIB",
@@ -38867,7 +39257,7 @@ var require_rib = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/roboconf.js
-var require_roboconf = __commonJS((exports, module) => {
+var require_roboconf = __commonJS(function(exports, module) {
   function roboconf(hljs) {
     const IDENTIFIER = "[a-zA-Z-_][^\\n{]+\\{";
     const PROPERTY = {
@@ -38935,7 +39325,7 @@ var require_roboconf = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/routeros.js
-var require_routeros = __commonJS((exports, module) => {
+var require_routeros = __commonJS(function(exports, module) {
   function routeros(hljs) {
     const STATEMENTS = "foreach do while for if from to step else on-error and or not in";
     const GLOBAL_COMMANDS = "global local beep delay put len typeof pick log time set find environment terminal error execute parse resolve toarray tobool toid toip toip6 tonum tostr totime";
@@ -39059,7 +39449,7 @@ var require_routeros = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/rsl.js
-var require_rsl = __commonJS((exports, module) => {
+var require_rsl = __commonJS(function(exports, module) {
   function rsl(hljs) {
     const BUILT_INS = [
       "abs",
@@ -39199,7 +39589,7 @@ var require_rsl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/ruleslanguage.js
-var require_ruleslanguage = __commonJS((exports, module) => {
+var require_ruleslanguage = __commonJS(function(exports, module) {
   function ruleslanguage(hljs) {
     return {
       name: "Oracle Rules Language",
@@ -39230,18 +39620,18 @@ var require_ruleslanguage = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/rust.js
-var require_rust = __commonJS((exports, module) => {
+var require_rust = __commonJS(function(exports, module) {
   function rust(hljs) {
     const regex = hljs.regex;
     const RAW_IDENTIFIER = /(r#)?/;
     const UNDERSCORE_IDENT_RE = regex.concat(RAW_IDENTIFIER, hljs.UNDERSCORE_IDENT_RE);
     const IDENT_RE = regex.concat(RAW_IDENTIFIER, hljs.IDENT_RE);
     const FUNCTION_INVOKE = {
-      className: "title.function.invoke",
+      scope: "title.function.invoke",
       relevance: 0,
-      begin: regex.concat(/\b/, /(?!let|for|while|if|else|match\b)/, IDENT_RE, regex.lookahead(/\s*\(/))
+      begin: regex.concat(/\b/, /(?!(?:let|for|while|if|else|match)\b)/, IDENT_RE, regex.lookahead(/\s*\(/))
     };
-    const NUMBER_SUFFIX = "([ui](8|16|32|64|128|size)|f(32|64))?";
+    const NUMBER_SUFFIX = "([ui](8|16|32|64|128|size)|f(16|32|64|128))?";
     const KEYWORDS = [
       "abstract",
       "as",
@@ -39275,6 +39665,7 @@ var require_rust = __commonJS((exports, module) => {
       "override",
       "priv",
       "pub",
+      "raw",
       "ref",
       "return",
       "self",
@@ -39382,8 +39773,10 @@ var require_rust = __commonJS((exports, module) => {
       "u64",
       "u128",
       "usize",
+      "f16",
       "f32",
       "f64",
+      "f128",
       "str",
       "char",
       "bool",
@@ -39412,7 +39805,7 @@ var require_rust = __commonJS((exports, module) => {
           illegal: null
         }),
         {
-          className: "symbol",
+          scope: "symbol",
           begin: /'[a-zA-Z_][a-zA-Z0-9_]*(?!')/
         },
         {
@@ -39425,14 +39818,14 @@ var require_rust = __commonJS((exports, module) => {
               contains: [
                 {
                   scope: "char.escape",
-                  match: /\\('|\w|x\w{2}|u\w{4}|U\w{8})/
+                  match: /\\('|"|\\|\w|x\w{2}|u\w{4}|U\w{8})/
                 }
               ]
             }
           ]
         },
         {
-          className: "number",
+          scope: "number",
           variants: [
             { begin: "\\b0b([01_]+)" + NUMBER_SUFFIX },
             { begin: "\\b0o([0-7_]+)" + NUMBER_SUFFIX },
@@ -39443,22 +39836,33 @@ var require_rust = __commonJS((exports, module) => {
         },
         {
           begin: [
+            /\bsafe/,
+            /\s+/,
+            /extern/
+          ],
+          scope: {
+            1: "keyword",
+            3: "keyword"
+          }
+        },
+        {
+          begin: [
             /fn/,
             /\s+/,
             UNDERSCORE_IDENT_RE
           ],
-          className: {
+          scope: {
             1: "keyword",
             3: "title.function"
           }
         },
         {
-          className: "meta",
+          scope: "meta",
           begin: "#!?\\[",
           end: "\\]",
           contains: [
             {
-              className: "string",
+              scope: "string",
               begin: /"/,
               end: /"/,
               contains: [
@@ -39474,7 +39878,7 @@ var require_rust = __commonJS((exports, module) => {
             /(?:mut\s+)?/,
             UNDERSCORE_IDENT_RE
           ],
-          className: {
+          scope: {
             1: "keyword",
             3: "keyword",
             4: "variable"
@@ -39488,7 +39892,7 @@ var require_rust = __commonJS((exports, module) => {
             /\s+/,
             /in/
           ],
-          className: {
+          scope: {
             1: "keyword",
             3: "variable",
             5: "keyword"
@@ -39500,7 +39904,7 @@ var require_rust = __commonJS((exports, module) => {
             /\s+/,
             UNDERSCORE_IDENT_RE
           ],
-          className: {
+          scope: {
             1: "keyword",
             3: "title.class"
           }
@@ -39511,7 +39915,7 @@ var require_rust = __commonJS((exports, module) => {
             /\s+/,
             UNDERSCORE_IDENT_RE
           ],
-          className: {
+          scope: {
             1: "keyword",
             3: "title.class"
           }
@@ -39525,7 +39929,7 @@ var require_rust = __commonJS((exports, module) => {
           }
         },
         {
-          className: "punctuation",
+          scope: "punctuation",
           begin: "->"
         },
         FUNCTION_INVOKE
@@ -39536,7 +39940,7 @@ var require_rust = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/sas.js
-var require_sas = __commonJS((exports, module) => {
+var require_sas = __commonJS(function(exports, module) {
   function sas(hljs) {
     const regex = hljs.regex;
     const SAS_KEYWORDS = [
@@ -40075,7 +40479,7 @@ var require_sas = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/scala.js
-var require_scala = __commonJS((exports, module) => {
+var require_scala = __commonJS(function(exports, module) {
   function scala(hljs) {
     const regex = hljs.regex;
     const ANNOTATION = {
@@ -40263,7 +40667,7 @@ var require_scala = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/scheme.js
-var require_scheme = __commonJS((exports, module) => {
+var require_scheme = __commonJS(function(exports, module) {
   function scheme(hljs) {
     const SCHEME_IDENT_RE = "[^\\(\\)\\[\\]\\{\\}\",'`;#|\\\\\\s]+";
     const SCHEME_SIMPLE_NUMBER_RE = "(-|\\+)?\\d+([./]\\d+)?";
@@ -40401,7 +40805,7 @@ var require_scheme = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/scilab.js
-var require_scilab = __commonJS((exports, module) => {
+var require_scilab = __commonJS(function(exports, module) {
   function scilab(hljs) {
     const COMMON_CONTAINS = [
       hljs.C_NUMBER_MODE,
@@ -40457,7 +40861,7 @@ var require_scilab = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/scss.js
-var require_scss = __commonJS((exports, module) => {
+var require_scss = __commonJS(function(exports, module) {
   var MODES = (hljs) => {
     return {
       IMPORTANT: {
@@ -40468,6 +40872,10 @@ var require_scss = __commonJS((exports, module) => {
       HEXCOLOR: {
         scope: "number",
         begin: /#(([0-9a-fA-F]{3,4})|(([0-9a-fA-F]{2}){3,4}))\b/
+      },
+      UNICODE_RANGE: {
+        scope: "number",
+        begin: /\b[Uu]\+[0-9A-Fa-f][0-9A-Fa-f?]{0,5}(-[0-9A-Fa-f][0-9A-Fa-f]{0,5})?/
       },
       FUNCTION_DISPATCH: {
         className: "built_in",
@@ -40881,6 +41289,11 @@ var require_scss = __commonJS((exports, module) => {
     "container-type",
     "content",
     "content-visibility",
+    "corner-bottom-left-shape",
+    "corner-bottom-right-shape",
+    "corner-shape",
+    "corner-top-left-shape",
+    "corner-top-right-shape",
     "counter-increment",
     "counter-reset",
     "counter-set",
@@ -41216,6 +41629,7 @@ var require_scss = __commonJS((exports, module) => {
     "transition-timing-function",
     "translate",
     "unicode-bidi",
+    "unicode-range",
     "user-modify",
     "user-select",
     "vector-effect",
@@ -41313,6 +41727,7 @@ var require_scss = __commonJS((exports, module) => {
             VARIABLE,
             modes.HEXCOLOR,
             modes.CSS_NUMBER_MODE,
+            modes.UNICODE_RANGE,
             hljs.QUOTE_STRING_MODE,
             hljs.APOS_STRING_MODE,
             modes.IMPORTANT,
@@ -41359,7 +41774,7 @@ var require_scss = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/shell.js
-var require_shell = __commonJS((exports, module) => {
+var require_shell = __commonJS(function(exports, module) {
   function shell(hljs) {
     return {
       name: "Shell Session",
@@ -41370,7 +41785,7 @@ var require_shell = __commonJS((exports, module) => {
       contains: [
         {
           className: "meta.prompt",
-          begin: /^\s{0,3}[/~\w\d[\]()@-]*[>%$#][ ]?/,
+          begin: /^\s{0,3}[./~\w\d[\]()@-]*[>%$#][ ]?/,
           starts: {
             end: /[^\\](?=\s*$)/,
             subLanguage: "bash"
@@ -41383,7 +41798,7 @@ var require_shell = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/smali.js
-var require_smali = __commonJS((exports, module) => {
+var require_smali = __commonJS(function(exports, module) {
   function smali(hljs) {
     const smali_instr_low_prio = [
       "add",
@@ -41501,7 +41916,7 @@ var require_smali = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/smalltalk.js
-var require_smalltalk = __commonJS((exports, module) => {
+var require_smalltalk = __commonJS(function(exports, module) {
   function smalltalk(hljs) {
     const VAR_IDENT_RE = "[a-z][a-zA-Z0-9_]*";
     const CHAR = {
@@ -41562,7 +41977,7 @@ var require_smalltalk = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/sml.js
-var require_sml = __commonJS((exports, module) => {
+var require_sml = __commonJS(function(exports, module) {
   function sml(hljs) {
     return {
       name: "SML (Standard ML)",
@@ -41617,7 +42032,7 @@ var require_sml = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/sqf.js
-var require_sqf = __commonJS((exports, module) => {
+var require_sqf = __commonJS(function(exports, module) {
   function sqf(hljs) {
     const VARIABLE = {
       className: "variable",
@@ -41654,9 +42069,9 @@ var require_sqf = __commonJS((exports, module) => {
     };
     const KEYWORDS = [
       "break",
-      "breakWith",
       "breakOut",
       "breakTo",
+      "breakWith",
       "case",
       "catch",
       "continue",
@@ -41668,12 +42083,16 @@ var require_sqf = __commonJS((exports, module) => {
       "exitWith",
       "for",
       "forEach",
+      "forEachMember",
+      "forEachMemberAgent",
+      "forEachMemberTeam",
+      "forEachReversed",
       "from",
       "if",
-      "local",
       "private",
-      "switch",
+      "privateAll",
       "step",
+      "switch",
       "then",
       "throw",
       "to",
@@ -41687,8 +42106,8 @@ var require_sqf = __commonJS((exports, module) => {
       "civilian",
       "configNull",
       "controlNull",
-      "displayNull",
       "diaryRecordNull",
+      "displayNull",
       "east",
       "endl",
       "false",
@@ -41696,6 +42115,7 @@ var require_sqf = __commonJS((exports, module) => {
       "independent",
       "lineBreak",
       "locationNull",
+      "netObjNull",
       "nil",
       "objNull",
       "opfor",
@@ -41725,6 +42145,7 @@ var require_sqf = __commonJS((exports, module) => {
       "actionKeysNames",
       "actionKeysNamesArray",
       "actionName",
+      "actionNow",
       "actionParams",
       "activateAddons",
       "activatedAddons",
@@ -41745,6 +42166,7 @@ var require_sqf = __commonJS((exports, module) => {
       "addCuratorEditableObjects",
       "addCuratorEditingArea",
       "addCuratorPoints",
+      "addCuratorSelected",
       "addEditorObject",
       "addEventHandler",
       "addForce",
@@ -41768,6 +42190,7 @@ var require_sqf = __commonJS((exports, module) => {
       "addMagazineGlobal",
       "addMagazinePool",
       "addMagazines",
+      "addMagazinesTurret",
       "addMagazineTurret",
       "addMenu",
       "addMenuItem",
@@ -41818,6 +42241,7 @@ var require_sqf = __commonJS((exports, module) => {
       "allActiveTitleEffects",
       "allAddonsInfo",
       "allAirports",
+      "allCameras",
       "allControls",
       "allCurators",
       "allCutLayers",
@@ -41827,6 +42251,7 @@ var require_sqf = __commonJS((exports, module) => {
       "allDiarySubjects",
       "allDisplays",
       "allEnv3DSoundSources",
+      "allExtensions",
       "allGroups",
       "allLODs",
       "allMapMarkers",
@@ -41856,6 +42281,8 @@ var require_sqf = __commonJS((exports, module) => {
       "ammo",
       "ammoOnPylon",
       "and",
+      "angularVelocity",
+      "angularVelocityModelSpace",
       "animate",
       "animateBay",
       "animateDoor",
@@ -41899,6 +42326,7 @@ var require_sqf = __commonJS((exports, module) => {
       "atan2",
       "atg",
       "ATLToASL",
+      "attachChild",
       "attachedObject",
       "attachedObjects",
       "attachedTo",
@@ -41911,7 +42339,9 @@ var require_sqf = __commonJS((exports, module) => {
       "backpackContainer",
       "backpackItems",
       "backpackMagazines",
+      "backpacks",
       "backpackSpaceFor",
+      "batteryChargeRTD",
       "behaviour",
       "benchmark",
       "bezierInterpolation",
@@ -41925,9 +42355,9 @@ var require_sqf = __commonJS((exports, module) => {
       "briefingName",
       "buildingExit",
       "buildingPos",
-      "buldozer_EnableRoadDiag",
-      "buldozer_IsEnabledRoadDiag",
-      "buldozer_LoadNewRoads",
+      "buldozer_enableRoadDiag",
+      "buldozer_isEnabledRoadDiag",
+      "buldozer_loadNewRoads",
       "buldozer_reloadOperMap",
       "buttonAction",
       "buttonSetAction",
@@ -41994,6 +42424,7 @@ var require_sqf = __commonJS((exports, module) => {
       "cheatsEnabled",
       "checkAIFeature",
       "checkVisibility",
+      "childAttached",
       "className",
       "clear3DENAttribute",
       "clear3DENInventory",
@@ -42005,11 +42436,13 @@ var require_sqf = __commonJS((exports, module) => {
       "clearItemCargo",
       "clearItemCargoGlobal",
       "clearItemPool",
+      "clearKillConfirmations",
       "clearMagazineCargo",
       "clearMagazineCargoGlobal",
       "clearMagazinePool",
       "clearOverlay",
       "clearRadio",
+      "clearVehicleInit",
       "clearWeaponCargo",
       "clearWeaponCargoGlobal",
       "clearWeaponPool",
@@ -42023,6 +42456,7 @@ var require_sqf = __commonJS((exports, module) => {
       "collisionDisabledWith",
       "combatBehaviour",
       "combatMode",
+      "combatPace",
       "commandArtilleryFire",
       "commandChat",
       "commander",
@@ -42041,11 +42475,13 @@ var require_sqf = __commonJS((exports, module) => {
       "commitOverlay",
       "compatibleItems",
       "compatibleMagazines",
+      "compatibleWeapons",
       "compile",
       "compileFinal",
       "compileScript",
       "completedFSM",
       "composeText",
+      "config_greater_greater_name",
       "configClasses",
       "configFile",
       "configHierarchy",
@@ -42084,6 +42520,7 @@ var require_sqf = __commonJS((exports, module) => {
       "createGuardedPoint",
       "createHashMap",
       "createHashMapFromArray",
+      "createHashMapObject",
       "createLocation",
       "createMarker",
       "createMarkerLocal",
@@ -42095,6 +42532,8 @@ var require_sqf = __commonJS((exports, module) => {
       "createSimpleTask",
       "createSite",
       "createSoundSource",
+      "createSoundSourceLocal",
+      "createTarget",
       "createTask",
       "createTeam",
       "createTrigger",
@@ -42143,6 +42582,7 @@ var require_sqf = __commonJS((exports, module) => {
       "ctrlMapAnimCommit",
       "ctrlMapAnimDone",
       "ctrlMapCursor",
+      "ctrlMapDir",
       "ctrlMapMouseOver",
       "ctrlMapPosition",
       "ctrlMapScale",
@@ -42152,6 +42592,7 @@ var require_sqf = __commonJS((exports, module) => {
       "ctrlModel",
       "ctrlModelDirAndUp",
       "ctrlModelScale",
+      "ctrlModelVectorSide",
       "ctrlMousePosition",
       "ctrlParent",
       "ctrlParentControlsGroup",
@@ -42237,6 +42678,7 @@ var require_sqf = __commonJS((exports, module) => {
       "ctrlURL",
       "ctrlURLOverlayMode",
       "ctrlVisible",
+      "ctrlWebBrowserAction",
       "ctRowControls",
       "ctRowCount",
       "ctSetCurSel",
@@ -42257,6 +42699,7 @@ var require_sqf = __commonJS((exports, module) => {
       "curatorPoints",
       "curatorRegisteredObjects",
       "curatorSelected",
+      "curatorSelectionPreset",
       "curatorWaypointCost",
       "current3DENOperation",
       "currentChannel",
@@ -42311,11 +42754,13 @@ var require_sqf = __commonJS((exports, module) => {
       "deleteResources",
       "deleteSite",
       "deleteStatus",
+      "deleteTarget",
       "deleteTeam",
       "deleteVehicle",
       "deleteVehicleCrew",
       "deleteWaypoint",
       "detach",
+      "detachChild",
       "detectedMines",
       "diag_activeMissionFSMs",
       "diag_activeScripts",
@@ -42327,18 +42772,21 @@ var require_sqf = __commonJS((exports, module) => {
       "diag_captureSlowFrame",
       "diag_codePerformance",
       "diag_deltaTime",
-      "diag_drawmode",
+      "diag_drawMode",
       "diag_dumpCalltraceToLog",
       "diag_dumpScriptAssembly",
       "diag_dumpTerrainSynth",
       "diag_dynamicSimulationEnd",
+      "diag_dynamicSimulationStart",
       "diag_enable",
       "diag_enabled",
       "diag_exportConfig",
       "diag_exportTerrainSVG",
       "diag_fps",
-      "diag_fpsmin",
-      "diag_frameno",
+      "diag_fpsMin",
+      "diag_frameNo",
+      "diag_getTerrainGrid",
+      "diag_getTerrainHeight",
       "diag_getTerrainSegmentOffset",
       "diag_lightNewLoad",
       "diag_list",
@@ -42347,11 +42795,15 @@ var require_sqf = __commonJS((exports, module) => {
       "diag_logSlowFrame",
       "diag_mergeConfigFile",
       "diag_recordTurretLimits",
-      "diag_resetFSM",
-      "diag_resetshapes",
+      "diag_remainsCollector",
+      "diag_resetAnims",
+      "diag_resetShapes",
       "diag_scope",
       "diag_setLightNew",
+      "diag_setTerrainHeight",
+      "diag_SQFCDebugDump",
       "diag_stacktrace",
+      "diag_testScriptSimpleVM",
       "diag_tickTime",
       "diag_toggle",
       "dialog",
@@ -42415,6 +42867,7 @@ var require_sqf = __commonJS((exports, module) => {
       "drawPolygon",
       "drawRectangle",
       "drawTriangle",
+      "drawXPolygon",
       "driver",
       "drop",
       "dynamicSimulationDistance",
@@ -42449,7 +42902,9 @@ var require_sqf = __commonJS((exports, module) => {
       "enableEngineArtillery",
       "enableEnvironment",
       "enableFatigue",
+      "enableFreeLook",
       "enableGunLights",
+      "enableGunStabilization",
       "enableInfoPanelComponent",
       "enableIRLasers",
       "enableMimics",
@@ -42473,6 +42928,7 @@ var require_sqf = __commonJS((exports, module) => {
       "enableWeaponDisassembly",
       "endLoadingScreen",
       "endMission",
+      "enemy",
       "engineOn",
       "enginesIsOnRTD",
       "enginesPowerRTD",
@@ -42494,6 +42950,7 @@ var require_sqf = __commonJS((exports, module) => {
       "exp",
       "expectedDestination",
       "exportJIPMessages",
+      "exportLandscapeXYZ",
       "eyeDirection",
       "eyePos",
       "face",
@@ -42531,6 +42988,7 @@ var require_sqf = __commonJS((exports, module) => {
       "flyInHeight",
       "flyInHeightASL",
       "focusedCtrl",
+      "focusOn",
       "fog",
       "fogForecast",
       "fogParams",
@@ -42542,6 +43000,7 @@ var require_sqf = __commonJS((exports, module) => {
       "forceFlagTexture",
       "forceFollowRoad",
       "forceGeneratorRTD",
+      "forceHitPointsDamageSync",
       "forceMap",
       "forceRespawn",
       "forceSpeed",
@@ -42549,9 +43008,6 @@ var require_sqf = __commonJS((exports, module) => {
       "forceWalk",
       "forceWeaponFire",
       "forceWeatherChange",
-      "forEachMember",
-      "forEachMemberAgent",
-      "forEachMemberTeam",
       "forgetTarget",
       "format",
       "formation",
@@ -42564,9 +43020,12 @@ var require_sqf = __commonJS((exports, module) => {
       "formLeader",
       "freeExtension",
       "freeLook",
+      "friendly",
       "fromEditor",
+      "fromJSON",
       "fuel",
       "fullCrew",
+      "gameValueToJson",
       "gearIDCAmmoCount",
       "gearSlotAmmoCount",
       "gearSlotData",
@@ -42574,17 +43033,22 @@ var require_sqf = __commonJS((exports, module) => {
       "get",
       "get3DENActionState",
       "get3DENAttribute",
+      "get3DENAttributes",
       "get3DENCamera",
       "get3DENConnections",
       "get3DENEntity",
       "get3DENEntityID",
       "get3DENGrid",
       "get3DENIconsVisible",
+      "get3DENLayer",
       "get3DENLayerEntities",
       "get3DENLinesVisible",
       "get3DENMissionAttribute",
+      "get3DENMissionAttributes",
       "get3DENMouseOver",
+      "get3DENParent",
       "get3DENSelected",
+      "getAimDirectionAndUp",
       "getAimingCoef",
       "getAllEnv3DSoundControllers",
       "getAllEnvSoundControllers",
@@ -42595,6 +43059,7 @@ var require_sqf = __commonJS((exports, module) => {
       "getAllUnitTraits",
       "getAmmoCargo",
       "getAnimAimPrecision",
+      "getAnimationsQueue",
       "getAnimSpeedCoef",
       "getArray",
       "getArtilleryAmmo",
@@ -42607,6 +43072,7 @@ var require_sqf = __commonJS((exports, module) => {
       "getAudioOptionVolumes",
       "getBackpackCargo",
       "getBleedingRemaining",
+      "getBoneNames",
       "getBurningValue",
       "getCalculatePlayerVisibilityByFriendly",
       "getCameraViewDirection",
@@ -42619,7 +43085,9 @@ var require_sqf = __commonJS((exports, module) => {
       "getConnectedUAVUnit",
       "getContainerMaxLoad",
       "getCorpse",
+      "getCorpseWeaponholders",
       "getCruiseControl",
+      "getCurrentPlayerLevel",
       "getCursorObjectParams",
       "getCustomAimCoef",
       "getCustomSoundController",
@@ -42639,6 +43107,7 @@ var require_sqf = __commonJS((exports, module) => {
       "getEditorObjectScope",
       "getElevationOffset",
       "getEngineTargetRPMRTD",
+      "getEntityInfo",
       "getEnv3DSoundController",
       "getEnvSoundController",
       "getEventHandlerInfo",
@@ -42649,6 +43118,7 @@ var require_sqf = __commonJS((exports, module) => {
       "getFriend",
       "getFSMVariable",
       "getFuelCargo",
+      "getFuelConsumptionCoef",
       "getGraphValues",
       "getGroupIcon",
       "getGroupIconParams",
@@ -42658,9 +43128,12 @@ var require_sqf = __commonJS((exports, module) => {
       "getHitIndex",
       "getHitPointDamage",
       "getItemCargo",
+      "getLeaning",
+      "getLightInfo",
       "getLighting",
       "getLightingAt",
       "getLoadedModsInfo",
+      "getLoginStatus",
       "getMagazineCargo",
       "getMarkerColor",
       "getMarkerPos",
@@ -42672,10 +43145,12 @@ var require_sqf = __commonJS((exports, module) => {
       "getMissionDLCs",
       "getMissionLayerEntities",
       "getMissionLayers",
+      "getMissionOptions",
       "getMissionPath",
       "getModelInfo",
       "getMousePosition",
       "getMusicPlayedTime",
+      "getNextId",
       "getNumber",
       "getObjectArgument",
       "getObjectChildren",
@@ -42693,16 +43168,21 @@ var require_sqf = __commonJS((exports, module) => {
       "getOrDefaultCall",
       "getOxygenRemaining",
       "getPersonUsedDLCs",
+      "getPhysicsCollisionFlag",
       "getPilotCameraDirection",
+      "getPilotCameraOpticsMode",
       "getPilotCameraPosition",
       "getPilotCameraRotation",
       "getPilotCameraTarget",
       "getPiPViewDistance",
       "getPlateNumber",
       "getPlayerChannel",
+      "getPlayerCloudId",
       "getPlayerID",
+      "getPlayerLevel",
       "getPlayerScores",
       "getPlayerUID",
+      "getPlayerUIDOld",
       "getPlayerVoNVolume",
       "getPos",
       "getPosASL",
@@ -42719,13 +43199,18 @@ var require_sqf = __commonJS((exports, module) => {
       "getRemoteSensorsDisabled",
       "getRepairCargo",
       "getResolution",
+      "getRespawnVehicleInfo",
       "getRoadInfo",
       "getRotorBrakeRTD",
+      "getSelectionBones",
       "getSensorTargets",
       "getSensorThreats",
+      "getServerInfo",
       "getShadowDistance",
+      "getShotInfo",
       "getShotParents",
       "getSlingLoad",
+      "getSlotItemName",
       "getSoundController",
       "getSoundControllerResult",
       "getSpeed",
@@ -42742,13 +43227,16 @@ var require_sqf = __commonJS((exports, module) => {
       "getTextRaw",
       "getTextureInfo",
       "getTextWidth",
-      "getTiParameters",
+      "getTIParameters",
       "getTotalDLCUsageTime",
+      "getTowParent",
       "getTrimOffsetRTD",
       "getTurretLimits",
       "getTurretOpticsMode",
       "getUnitFreefallInfo",
       "getUnitLoadout",
+      "getUnitMovesInfo",
+      "getUnitState",
       "getUnitTrait",
       "getUnloadInCombat",
       "getUserInfo",
@@ -42756,11 +43244,15 @@ var require_sqf = __commonJS((exports, module) => {
       "getUserMFDValue",
       "getVariable",
       "getVehicleCargo",
-      "getVehicleTiPars",
+      "getVehicleTIPars",
+      "getVideoOptions",
+      "getWaterFillPercentage",
+      "getWaterLeakiness",
       "getWeaponCargo",
       "getWeaponSway",
       "getWingsOrientationRTD",
       "getWingsPositionRTD",
+      "getWorld",
       "getWPPos",
       "glanceAt",
       "globalChat",
@@ -42772,7 +43264,7 @@ var require_sqf = __commonJS((exports, module) => {
       "groupFromNetId",
       "groupIconSelectable",
       "groupIconsVisible",
-      "groupID",
+      "groupId",
       "groupOwner",
       "groupRadio",
       "groups",
@@ -42785,6 +43277,7 @@ var require_sqf = __commonJS((exports, module) => {
       "handgunMagazine",
       "handgunWeapon",
       "handsHit",
+      "hasCustomFace",
       "hashValue",
       "hasInterface",
       "hasPilotCamera",
@@ -42800,6 +43293,9 @@ var require_sqf = __commonJS((exports, module) => {
       "hcShowBar",
       "hcShownBar",
       "headgear",
+      "hiddenActions",
+      "hideActions",
+      "hideBehindScripted",
       "hideBody",
       "hideObject",
       "hideObjectGlobal",
@@ -42813,12 +43309,16 @@ var require_sqf = __commonJS((exports, module) => {
       "htmlLoad",
       "HUDMovementLevels",
       "humidity",
+      "ignore3DENHistory",
+      "ignoreTarget",
       "image",
+      "import",
       "importAllGroups",
       "importance",
       "in",
       "inArea",
       "inAreaArray",
+      "inAreaArrayIndexes",
       "incapacitatedState",
       "inflame",
       "inflamed",
@@ -42836,6 +43336,7 @@ var require_sqf = __commonJS((exports, module) => {
       "inRangeOfArtillery",
       "insert",
       "insertEditorObject",
+      "insideBuilding",
       "intersect",
       "is3DEN",
       "is3DENMultiplayer",
@@ -42844,7 +43345,9 @@ var require_sqf = __commonJS((exports, module) => {
       "isActionMenuVisible",
       "isAgent",
       "isAimPrecisionEnabled",
+      "isAISteeringComponentEnabled",
       "isAllowedCrewInImmobile",
+      "isAppSubscribed",
       "isArray",
       "isAutoHoverOn",
       "isAutonomous",
@@ -42878,6 +43381,7 @@ var require_sqf = __commonJS((exports, module) => {
       "isGamePaused",
       "isGroupDeletedWhenEmpty",
       "isHidden",
+      "isHideBehindScripted",
       "isInRemainsCollector",
       "isInstructorFigureEnabled",
       "isIRLaserOn",
@@ -42901,7 +43405,9 @@ var require_sqf = __commonJS((exports, module) => {
       "isOnRoad",
       "isPiPEnabled",
       "isPlayer",
+      "isPlayerSupporter",
       "isRealTime",
+      "isRemoteControlling",
       "isRemoteExecuted",
       "isRemoteExecutedJIP",
       "isSaving",
@@ -42915,7 +43421,9 @@ var require_sqf = __commonJS((exports, module) => {
       "isSteamOverlayEnabled",
       "isStreamFriendlyUIEnabled",
       "isStressDamageEnabled",
+      "isSwitchingWeapon",
       "isText",
+      "isThrowable",
       "isTouchingGround",
       "isTurnedOut",
       "isTutHintsEnabled",
@@ -42923,6 +43431,7 @@ var require_sqf = __commonJS((exports, module) => {
       "isUAVConnected",
       "isUIContext",
       "isUniformAllowed",
+      "isUsingAISteeringComponent",
       "isVehicleCargo",
       "isVehicleRadarOn",
       "isVehicleSensorEnabled",
@@ -42937,6 +43446,7 @@ var require_sqf = __commonJS((exports, module) => {
       "joinAsSilent",
       "joinSilent",
       "joinString",
+      "jsonToGameValue",
       "kbAddDatabase",
       "kbAddDatabaseTargets",
       "kbAddTopic",
@@ -42948,6 +43458,7 @@ var require_sqf = __commonJS((exports, module) => {
       "keyImage",
       "keyName",
       "keys",
+      "kickPlayer",
       "knowsAbout",
       "land",
       "landAt",
@@ -43058,9 +43569,11 @@ var require_sqf = __commonJS((exports, module) => {
       "lnbTextRight",
       "lnbValue",
       "load",
+      "load3DENScenario",
       "loadAbs",
       "loadBackpack",
       "loadConfig",
+      "loadCuratorSelectionPreset",
       "loadFile",
       "loadGame",
       "loadIdentity",
@@ -43069,6 +43582,7 @@ var require_sqf = __commonJS((exports, module) => {
       "loadStatus",
       "loadUniform",
       "loadVest",
+      "local",
       "localize",
       "localNamespace",
       "locationPosition",
@@ -43085,7 +43599,7 @@ var require_sqf = __commonJS((exports, module) => {
       "lockIdentity",
       "lockInventory",
       "lockTurret",
-      "lockWp",
+      "lockWP",
       "log",
       "logEntities",
       "logNetwork",
@@ -43116,6 +43630,7 @@ var require_sqf = __commonJS((exports, module) => {
       "markerChannel",
       "markerColor",
       "markerDir",
+      "markerDrawPriority",
       "markerPolyline",
       "markerPos",
       "markerShadow",
@@ -43159,6 +43674,7 @@ var require_sqf = __commonJS((exports, module) => {
       "min",
       "mineActive",
       "mineDetectedBy",
+      "missileState",
       "missileTarget",
       "missileTargetPos",
       "missionConfigFile",
@@ -43189,6 +43705,7 @@ var require_sqf = __commonJS((exports, module) => {
       "moveInTurret",
       "moveObjectToEnd",
       "moveOut",
+      "moveTarget",
       "moveTime",
       "moveTo",
       "moveToCompleted",
@@ -43222,10 +43739,12 @@ var require_sqf = __commonJS((exports, module) => {
       "not",
       "numberOfEnginesRTD",
       "numberToDate",
+      "object",
       "objectCurators",
       "objectFromNetId",
       "objectParent",
       "objStatus",
+      "onBriefingGear",
       "onBriefingGroup",
       "onBriefingNotes",
       "onBriefingPlan",
@@ -43238,6 +43757,7 @@ var require_sqf = __commonJS((exports, module) => {
       "onGroupIconOverLeave",
       "onHCGroupSelectionChanged",
       "onMapSingleClick",
+      "onOfficialServer",
       "onPlayerConnected",
       "onPlayerDisconnected",
       "onPreloadFinished",
@@ -43246,6 +43766,7 @@ var require_sqf = __commonJS((exports, module) => {
       "onTeamSwitch",
       "openCuratorInterface",
       "openDLCPage",
+      "openDSInterface",
       "openGPS",
       "openMap",
       "openSteamApp",
@@ -43257,6 +43778,7 @@ var require_sqf = __commonJS((exports, module) => {
       "owner",
       "param",
       "params",
+      "parentAttached",
       "parseNumber",
       "parseSimpleArray",
       "parseText",
@@ -43278,6 +43800,7 @@ var require_sqf = __commonJS((exports, module) => {
       "playerRespawnTime",
       "playerSide",
       "playersNumber",
+      "playerTargetLock",
       "playGesture",
       "playMission",
       "playMove",
@@ -43313,6 +43836,7 @@ var require_sqf = __commonJS((exports, module) => {
       "primaryWeaponMagazine",
       "priority",
       "processDiaryLink",
+      "processInitCommands",
       "productVersion",
       "profileName",
       "profileNamespace",
@@ -43326,6 +43850,7 @@ var require_sqf = __commonJS((exports, module) => {
       "pushBack",
       "pushBackUnique",
       "putWeaponPool",
+      "pylonAction",
       "queryItemsPool",
       "queryMagazinePool",
       "queryWeaponPool",
@@ -43354,8 +43879,10 @@ var require_sqf = __commonJS((exports, module) => {
       "reload",
       "reloadEnabled",
       "remoteControl",
+      "remoteControlled",
       "remoteExec",
       "remoteExecCall",
+      "remoteExecutedJIPID",
       "remoteExecutedOwner",
       "remove3DENConnection",
       "remove3DENEventHandler",
@@ -43373,6 +43900,8 @@ var require_sqf = __commonJS((exports, module) => {
       "removeAllHandgunItems",
       "removeAllItems",
       "removeAllItemsWithMagazines",
+      "removeAllMagazines",
+      "removeAllMagazinesTurret",
       "removeAllMissionEventHandlers",
       "removeAllMPEventHandlers",
       "removeAllMusicEventHandlers",
@@ -43384,6 +43913,7 @@ var require_sqf = __commonJS((exports, module) => {
       "removeBackpack",
       "removeBackpackGlobal",
       "removeBinocularItem",
+      "removeClothing",
       "removeCuratorAddons",
       "removeCuratorCameraArea",
       "removeCuratorEditableObjects",
@@ -43425,6 +43955,7 @@ var require_sqf = __commonJS((exports, module) => {
       "removeWeaponAttachmentCargo",
       "removeWeaponCargo",
       "removeWeaponGlobal",
+      "removeWeaponItem",
       "removeWeaponTurret",
       "reportRemoteTarget",
       "requiredVersion",
@@ -43454,6 +43985,7 @@ var require_sqf = __commonJS((exports, module) => {
       "ropes",
       "ropesAttachedTo",
       "ropeSegments",
+      "ropeSetCargoMass",
       "ropeUnwind",
       "ropeUnwound",
       "rotorsForcesRTD",
@@ -43467,6 +43999,7 @@ var require_sqf = __commonJS((exports, module) => {
       "safeZoneXAbs",
       "safeZoneY",
       "save3DENInventory",
+      "save3DENPreferences",
       "saveGame",
       "saveIdentity",
       "saveJoysticks",
@@ -43484,6 +44017,7 @@ var require_sqf = __commonJS((exports, module) => {
       "scoreSide",
       "screenshot",
       "screenToWorld",
+      "screenToWorldDirection",
       "scriptDone",
       "scriptName",
       "scudState",
@@ -43505,9 +44039,14 @@ var require_sqf = __commonJS((exports, module) => {
       "selectPlayer",
       "selectRandom",
       "selectRandomWeighted",
+      "selectThrowable",
       "selectWeapon",
       "selectWeaponTurret",
+      "sendAnalyticEvent",
       "sendAUMessage",
+      "sendCloudRequest",
+      "sendCloudRequestClient",
+      "sendCloudRequestServer",
       "sendSimpleCommand",
       "sendTask",
       "sendTaskResult",
@@ -43516,10 +44055,13 @@ var require_sqf = __commonJS((exports, module) => {
       "serverCommand",
       "serverCommandAvailable",
       "serverCommandExecutable",
+      "serverConfigTopLevelEntry",
       "serverName",
       "serverNamespace",
+      "serverStartMission",
       "serverTime",
       "set",
+      "set3DENAttachedCursorEntity",
       "set3DENAttribute",
       "set3DENAttributes",
       "set3DENGrid",
@@ -43539,37 +44081,46 @@ var require_sqf = __commonJS((exports, module) => {
       "setAmmo",
       "setAmmoCargo",
       "setAmmoOnPylon",
+      "setAngularVelocity",
+      "setAngularVelocityModelSpace",
       "setAnimSpeedCoef",
       "setAperture",
       "setApertureNew",
+      "setAPURTD",
       "setArmoryPoints",
       "setAttributes",
       "setAutonomous",
+      "setBatteryChargeRTD",
+      "setBatteryRTD",
       "setBehaviour",
       "setBehaviourStrong",
       "setBleedingRemaining",
       "setBrakesRTD",
+      "setCameraEffect",
       "setCameraInterest",
       "setCamShakeDefParams",
       "setCamShakeParams",
-      "setCamUseTi",
+      "setCamUseTI",
       "setCaptive",
       "setCenterOfMass",
       "setCollisionLight",
       "setCombatBehaviour",
       "setCombatMode",
+      "setCompassDeclination",
       "setCompassOscillation",
       "setConvoySeparation",
       "setCruiseControl",
       "setCuratorCameraAreaCeiling",
       "setCuratorCoef",
       "setCuratorEditingAreaType",
+      "setCuratorSelected",
+      "setCuratorSelectionPreset",
       "setCuratorWaypointCost",
       "setCurrentChannel",
       "setCurrentTask",
       "setCurrentWaypoint",
       "setCustomAimCoef",
-      "SetCustomMissionData",
+      "setCustomMissionData",
       "setCustomSoundController",
       "setCustomWeightRTD",
       "setDamage",
@@ -43594,7 +44145,7 @@ var require_sqf = __commonJS((exports, module) => {
       "setEffectiveCommander",
       "setEngineRpmRTD",
       "setFace",
-      "setFaceanimation",
+      "setFaceAnimation",
       "setFatigue",
       "setFeatureType",
       "setFlagAnimationPhase",
@@ -43611,11 +44162,12 @@ var require_sqf = __commonJS((exports, module) => {
       "setFSMVariable",
       "setFuel",
       "setFuelCargo",
+      "setFuelConsumptionCoef",
       "setGroupIcon",
       "setGroupIconParams",
       "setGroupIconsSelectable",
       "setGroupIconsVisible",
-      "setGroupid",
+      "setGroupId",
       "setGroupIdGlobal",
       "setGroupOwner",
       "setGusts",
@@ -43629,6 +44181,10 @@ var require_sqf = __commonJS((exports, module) => {
       "setIdentity",
       "setImportance",
       "setInfoPanel",
+      "setJointDriveAngularVelocity",
+      "setJointDriveLinearVelocity",
+      "setJointDriveOrientation",
+      "setJointDrivePosition",
       "setLeader",
       "setLightAmbient",
       "setLightAttenuation",
@@ -43653,6 +44209,7 @@ var require_sqf = __commonJS((exports, module) => {
       "setMarkerColorLocal",
       "setMarkerDir",
       "setMarkerDirLocal",
+      "setMarkerDrawPriority",
       "setMarkerPolyline",
       "setMarkerPolylineLocal",
       "setMarkerPos",
@@ -43672,6 +44229,7 @@ var require_sqf = __commonJS((exports, module) => {
       "setMimic",
       "setMissileTarget",
       "setMissileTargetPos",
+      "setMissionOptions",
       "setMousePosition",
       "setMusicEffect",
       "setMusicEventHandler",
@@ -43694,7 +44252,9 @@ var require_sqf = __commonJS((exports, module) => {
       "setParticleFire",
       "setParticleParams",
       "setParticleRandom",
+      "setPhysicsCollisionFlag",
       "setPilotCameraDirection",
+      "setPilotCameraOpticsMode",
       "setPilotCameraRotation",
       "setPilotCameraTarget",
       "setPilotLight",
@@ -43741,19 +44301,24 @@ var require_sqf = __commonJS((exports, module) => {
       "setSpeedMode",
       "setStamina",
       "setStaminaScheme",
+      "setStarterRTD",
       "setStatValue",
       "setSuppression",
       "setSystemOfUnits",
       "setTargetAge",
+      "setTargetSize",
       "setTaskMarkerOffset",
       "setTaskResult",
       "setTaskState",
       "setTerrainGrid",
       "setTerrainHeight",
       "setText",
+      "setThrottleRTD",
       "setTimeMultiplier",
-      "setTiParameter",
+      "setTIParameter",
       "setTitleEffect",
+      "setToneMapping",
+      "setToneMappingParams",
       "setTowParent",
       "setTrafficDensity",
       "setTrafficDistance",
@@ -43792,13 +44357,14 @@ var require_sqf = __commonJS((exports, module) => {
       "setVehicleArmor",
       "setVehicleCargo",
       "setVehicleId",
+      "setVehicleInit",
       "setVehicleLock",
       "setVehiclePosition",
       "setVehicleRadar",
       "setVehicleReceiveRemoteTargets",
       "setVehicleReportOwnPosition",
       "setVehicleReportRemoteTargets",
-      "setVehicleTiPars",
+      "setVehicleTIPars",
       "setVehicleVarName",
       "setVelocity",
       "setVelocityModelSpace",
@@ -43806,6 +44372,8 @@ var require_sqf = __commonJS((exports, module) => {
       "setViewDistance",
       "setVisibleIfTreeCollapsed",
       "setWantedRPMRTD",
+      "setWaterFillPercentage",
+      "setWaterLeakiness",
       "setWaves",
       "setWaypointBehaviour",
       "setWaypointCombatMode",
@@ -43839,16 +44407,17 @@ var require_sqf = __commonJS((exports, module) => {
       "showCommandingMenu",
       "showCompass",
       "showCuratorCompass",
-      "showGps",
+      "showGPS",
       "showHUD",
       "showLegend",
       "showMap",
+      "shownAction",
       "shownArtilleryComputer",
       "shownChat",
       "shownCompass",
       "shownCuratorCompass",
       "showNewEditorObject",
-      "shownGps",
+      "shownGPS",
       "shownHUD",
       "shownMap",
       "shownPad",
@@ -43875,6 +44444,7 @@ var require_sqf = __commonJS((exports, module) => {
       "simulCloudDensity",
       "simulCloudOcclusion",
       "simulInClouds",
+      "simulSetHumidity",
       "simulWeatherSync",
       "sin",
       "size",
@@ -43893,6 +44463,7 @@ var require_sqf = __commonJS((exports, module) => {
       "soldierMagazines",
       "someAmmo",
       "sort",
+      "soundParams",
       "soundVolume",
       "spawn",
       "speaker",
@@ -43904,9 +44475,11 @@ var require_sqf = __commonJS((exports, module) => {
       "squadParams",
       "stance",
       "startLoadingScreen",
+      "steamGameRecordingEvent",
       "stop",
       "stopEngineRTD",
       "stopped",
+      "stopSound",
       "str",
       "sunOrMoon",
       "supportInfo",
@@ -43965,6 +44538,8 @@ var require_sqf = __commonJS((exports, module) => {
       "textLog",
       "textLogFormat",
       "tg",
+      "throttleRTD",
+      "throwables",
       "time",
       "timeMultiplier",
       "titleCut",
@@ -43974,6 +44549,7 @@ var require_sqf = __commonJS((exports, module) => {
       "titleText",
       "toArray",
       "toFixed",
+      "toJSON",
       "toLower",
       "toLowerANSI",
       "toString",
@@ -44040,6 +44616,7 @@ var require_sqf = __commonJS((exports, module) => {
       "UAVControl",
       "uiNamespace",
       "uiSleep",
+      "uiTime",
       "unassignCurator",
       "unassignItem",
       "unassignTeam",
@@ -44090,6 +44667,8 @@ var require_sqf = __commonJS((exports, module) => {
       "vectorModelToWorldVisual",
       "vectorMultiply",
       "vectorNormalized",
+      "vectorSide",
+      "vectorSideVisual",
       "vectorUp",
       "vectorUpVisual",
       "vectorWorldToModel",
@@ -44113,12 +44692,13 @@ var require_sqf = __commonJS((exports, module) => {
       "vestMagazines",
       "viewDistance",
       "visibleCompass",
-      "visibleGps",
+      "visibleGPS",
       "visibleMap",
       "visiblePosition",
       "visiblePositionASL",
       "visibleScoretable",
       "visibleWatch",
+      "waterDamaged",
       "waves",
       "waypointAttachedObject",
       "waypointAttachedVehicle",
@@ -44150,6 +44730,7 @@ var require_sqf = __commonJS((exports, module) => {
       "weaponAccessoriesCargo",
       "weaponCargo",
       "weaponDirection",
+      "weaponDisassemblyEnabled",
       "weaponInertia",
       "weaponLowered",
       "weaponReloadingTime",
@@ -44225,7 +44806,7 @@ var require_sqf = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/sql.js
-var require_sql = __commonJS((exports, module) => {
+var require_sql = __commonJS(function(exports, module) {
   function sql(hljs) {
     const regex = hljs.regex;
     const COMMENT_MODE = hljs.COMMENT("--", "$");
@@ -44863,7 +45444,7 @@ var require_sql = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/stan.js
-var require_stan = __commonJS((exports, module) => {
+var require_stan = __commonJS(function(exports, module) {
   function stan(hljs) {
     const regex = hljs.regex;
     const BLOCKS = [
@@ -45341,7 +45922,7 @@ var require_stan = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/stata.js
-var require_stata = __commonJS((exports, module) => {
+var require_stata = __commonJS(function(exports, module) {
   function stata(hljs) {
     return {
       name: "Stata",
@@ -45384,7 +45965,7 @@ var require_stata = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/step21.js
-var require_step21 = __commonJS((exports, module) => {
+var require_step21 = __commonJS(function(exports, module) {
   function step21(hljs) {
     const STEP21_IDENT_RE = "[A-Z_][A-Z0-9_.]*";
     const STEP21_KEYWORDS = {
@@ -45445,7 +46026,7 @@ var require_step21 = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/stylus.js
-var require_stylus = __commonJS((exports, module) => {
+var require_stylus = __commonJS(function(exports, module) {
   var MODES = (hljs) => {
     return {
       IMPORTANT: {
@@ -45456,6 +46037,10 @@ var require_stylus = __commonJS((exports, module) => {
       HEXCOLOR: {
         scope: "number",
         begin: /#(([0-9a-fA-F]{3,4})|(([0-9a-fA-F]{2}){3,4}))\b/
+      },
+      UNICODE_RANGE: {
+        scope: "number",
+        begin: /\b[Uu]\+[0-9A-Fa-f][0-9A-Fa-f?]{0,5}(-[0-9A-Fa-f][0-9A-Fa-f]{0,5})?/
       },
       FUNCTION_DISPATCH: {
         className: "built_in",
@@ -45869,6 +46454,11 @@ var require_stylus = __commonJS((exports, module) => {
     "container-type",
     "content",
     "content-visibility",
+    "corner-bottom-left-shape",
+    "corner-bottom-right-shape",
+    "corner-shape",
+    "corner-top-left-shape",
+    "corner-top-right-shape",
     "counter-increment",
     "counter-reset",
     "counter-set",
@@ -46204,6 +46794,7 @@ var require_stylus = __commonJS((exports, module) => {
     "transition-timing-function",
     "translate",
     "unicode-bidi",
+    "unicode-range",
     "user-modify",
     "user-select",
     "vector-effect",
@@ -46344,6 +46935,7 @@ var require_stylus = __commonJS((exports, module) => {
                 VARIABLE,
                 hljs.APOS_STRING_MODE,
                 modes.CSS_NUMBER_MODE,
+                modes.UNICODE_RANGE,
                 hljs.QUOTE_STRING_MODE
               ]
             }
@@ -46377,7 +46969,7 @@ var require_stylus = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/subunit.js
-var require_subunit = __commonJS((exports, module) => {
+var require_subunit = __commonJS(function(exports, module) {
   function subunit(hljs) {
     const DETAILS = {
       className: "string",
@@ -46419,7 +47011,7 @@ var require_subunit = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/swift.js
-var require_swift = __commonJS((exports, module) => {
+var require_swift = __commonJS(function(exports, module) {
   function source(re) {
     if (!re)
       return null;
@@ -46448,6 +47040,7 @@ var require_swift = __commonJS((exports, module) => {
     const joined = "(" + (opts.capture ? "" : "?:") + args.map((x) => source(x)).join("|") + ")";
     return joined;
   }
+  new RegExp(either(/\[(?:[^\\\]]|\\.)*\]/, /\(\?<(?![=!])[^>]+>/, /\(\?'[^']+'/, /\(\??/, /\\([1-9][0-9]*)/, /\\./));
   var keywordWrapper = (keyword) => concat(/\b/, keyword, /\w$/.test(keyword) ? /\b/ : /\B/);
   var dotKeywords = [
     "Protocol",
@@ -47175,7 +47768,7 @@ var require_swift = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/taggerscript.js
-var require_taggerscript = __commonJS((exports, module) => {
+var require_taggerscript = __commonJS(function(exports, module) {
   function taggerscript(hljs) {
     const NOOP = {
       className: "comment",
@@ -47225,7 +47818,7 @@ var require_taggerscript = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/yaml.js
-var require_yaml = __commonJS((exports, module) => {
+var require_yaml = __commonJS(function(exports, module) {
   function yaml(hljs) {
     const LITERALS = "true false yes no null";
     const URI_CHARACTERS = "[\\w#;/?:@&=+$,.~*'()[\\]]+";
@@ -47407,7 +48000,7 @@ var require_yaml = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/tap.js
-var require_tap = __commonJS((exports, module) => {
+var require_tap = __commonJS(function(exports, module) {
   function tap(hljs) {
     return {
       name: "Test Anything Protocol",
@@ -47445,7 +48038,7 @@ var require_tap = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/tcl.js
-var require_tcl = __commonJS((exports, module) => {
+var require_tcl = __commonJS(function(exports, module) {
   function tcl(hljs) {
     const regex = hljs.regex;
     const TCL_IDENT = /[a-zA-Z_][a-zA-Z0-9_]*/;
@@ -47621,7 +48214,7 @@ var require_tcl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/thrift.js
-var require_thrift = __commonJS((exports, module) => {
+var require_thrift = __commonJS(function(exports, module) {
   function thrift(hljs) {
     const TYPES = [
       "bool",
@@ -47693,7 +48286,7 @@ var require_thrift = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/tp.js
-var require_tp = __commonJS((exports, module) => {
+var require_tp = __commonJS(function(exports, module) {
   function tp(hljs) {
     const TPID = {
       className: "number",
@@ -47854,7 +48447,7 @@ var require_tp = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/twig.js
-var require_twig = __commonJS((exports, module) => {
+var require_twig = __commonJS(function(exports, module) {
   function twig(hljs) {
     const regex = hljs.regex;
     const FUNCTION_NAMES = [
@@ -48096,7 +48689,7 @@ var require_twig = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/typescript.js
-var require_typescript = __commonJS((exports, module) => {
+var require_typescript = __commonJS(function(exports, module) {
   var IDENT_RE = "[A-Za-z$_][0-9A-Za-z$_]*";
   var KEYWORDS = [
     "as",
@@ -48227,6 +48820,7 @@ var require_typescript = __commonJS((exports, module) => {
     "localStorage",
     "sessionStorage",
     "module",
+    "self",
     "global"
   ];
   var BUILT_INS = [].concat(BUILT_IN_GLOBALS, TYPES, ERROR_TYPES);
@@ -48513,7 +49107,8 @@ var require_typescript = __commonJS((exports, module) => {
       match: regex.concat(/\b/, noneOf([
         ...BUILT_IN_GLOBALS,
         "super",
-        "import"
+        "import",
+        "await"
       ].map((x) => `${x}\\s*\\(`)), IDENT_RE$1, regex.lookahead(/\s*\(/)),
       className: "title.function",
       relevance: 0
@@ -48569,7 +49164,7 @@ var require_typescript = __commonJS((exports, module) => {
       aliases: ["js", "jsx", "mjs", "cjs"],
       keywords: KEYWORDS$1,
       exports: { PARAMS_CONTAINS, CLASS_REFERENCE },
-      illegal: /#(?![$_A-z])/,
+      illegal: /#(?![$_A-Za-z])/,
       contains: [
         hljs.SHEBANG({
           label: "shebang",
@@ -48701,7 +49296,7 @@ var require_typescript = __commonJS((exports, module) => {
     const regex = hljs.regex;
     const tsLanguage = javascript(hljs);
     const IDENT_RE$1 = IDENT_RE;
-    const TYPES2 = [
+    const TYPES = [
       "any",
       "void",
       "number",
@@ -48730,7 +49325,7 @@ var require_typescript = __commonJS((exports, module) => {
       excludeEnd: true,
       keywords: {
         keyword: "interface extends",
-        built_in: TYPES2
+        built_in: TYPES
       },
       contains: [tsLanguage.exports.CLASS_REFERENCE]
     };
@@ -48757,7 +49352,7 @@ var require_typescript = __commonJS((exports, module) => {
       $pattern: IDENT_RE,
       keyword: KEYWORDS.concat(TS_SPECIFIC_KEYWORDS),
       literal: LITERALS,
-      built_in: BUILT_INS.concat(TYPES2),
+      built_in: BUILT_INS.concat(TYPES),
       "variable.language": BUILT_IN_VARIABLES
     };
     const DECORATOR = {
@@ -48805,7 +49400,7 @@ var require_typescript = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/vala.js
-var require_vala = __commonJS((exports, module) => {
+var require_vala = __commonJS(function(exports, module) {
   function vala(hljs) {
     return {
       name: "Vala",
@@ -48846,7 +49441,7 @@ var require_vala = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/vbnet.js
-var require_vbnet = __commonJS((exports, module) => {
+var require_vbnet = __commonJS(function(exports, module) {
   function vbnet(hljs) {
     const regex = hljs.regex;
     const CHARACTER = {
@@ -48958,7 +49553,7 @@ var require_vbnet = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/vbscript.js
-var require_vbscript = __commonJS((exports, module) => {
+var require_vbscript = __commonJS(function(exports, module) {
   function vbscript(hljs) {
     const regex = hljs.regex;
     const BUILT_IN_FUNCTIONS = [
@@ -49161,7 +49756,7 @@ var require_vbscript = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/vbscript-html.js
-var require_vbscript_html = __commonJS((exports, module) => {
+var require_vbscript_html = __commonJS(function(exports, module) {
   function vbscriptHtml(hljs) {
     return {
       name: "VBScript in HTML",
@@ -49179,7 +49774,7 @@ var require_vbscript_html = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/verilog.js
-var require_verilog = __commonJS((exports, module) => {
+var require_verilog = __commonJS(function(exports, module) {
   function verilog(hljs) {
     const regex = hljs.regex;
     const KEYWORDS = {
@@ -49721,7 +50316,7 @@ var require_verilog = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/vhdl.js
-var require_vhdl = __commonJS((exports, module) => {
+var require_vhdl = __commonJS(function(exports, module) {
   function vhdl(hljs) {
     const INTEGER_RE = "\\d(_|\\d)*";
     const EXPONENT_RE = "[eE][-+]?" + INTEGER_RE;
@@ -49922,7 +50517,7 @@ var require_vhdl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/vim.js
-var require_vim = __commonJS((exports, module) => {
+var require_vim = __commonJS(function(exports, module) {
   function vim(hljs) {
     return {
       name: "Vim Script",
@@ -49980,7 +50575,7 @@ var require_vim = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/wasm.js
-var require_wasm = __commonJS((exports, module) => {
+var require_wasm = __commonJS(function(exports, module) {
   function wasm(hljs) {
     hljs.regex;
     const BLOCK_COMMENT = hljs.COMMENT(/\(;/, /;\)/);
@@ -50101,7 +50696,7 @@ var require_wasm = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/wren.js
-var require_wren = __commonJS((exports, module) => {
+var require_wren = __commonJS(function(exports, module) {
   function wren(hljs) {
     const regex = hljs.regex;
     const IDENT_RE = /[a-zA-Z]\w*/;
@@ -50360,7 +50955,7 @@ var require_wren = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/x86asm.js
-var require_x86asm = __commonJS((exports, module) => {
+var require_x86asm = __commonJS(function(exports, module) {
   function x86asm(hljs) {
     return {
       name: "Intel x86 Assembly",
@@ -50432,7 +51027,7 @@ var require_x86asm = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/xl.js
-var require_xl = __commonJS((exports, module) => {
+var require_xl = __commonJS(function(exports, module) {
   function xl(hljs) {
     const KWS = [
       "if",
@@ -50632,7 +51227,7 @@ var require_xl = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/xquery.js
-var require_xquery = __commonJS((exports, module) => {
+var require_xquery = __commonJS(function(exports, module) {
   function xquery(_hljs) {
     const KEYWORDS = [
       "module",
@@ -50961,7 +51556,7 @@ var require_xquery = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/languages/zephir.js
-var require_zephir = __commonJS((exports, module) => {
+var require_zephir = __commonJS(function(exports, module) {
   function zephir(hljs) {
     const STRING = {
       className: "string",
@@ -51054,9 +51649,9 @@ var require_zephir = __commonJS((exports, module) => {
 });
 
 // node_modules/highlight.js/lib/index.js
-var require_lib = __commonJS((exports, module) => {
+var require_lib = __commonJS(function(exports, module) {
   var hljs = require_core();
-  hljs.registerLanguage("1c", require_1c());
+  hljs.registerLanguage("1c", require__1c());
   hljs.registerLanguage("abnf", require_abnf());
   hljs.registerLanguage("accesslog", require_accesslog());
   hljs.registerLanguage("actionscript", require_actionscript());
@@ -51119,6 +51714,7 @@ var require_lib = __commonJS((exports, module) => {
   hljs.registerLanguage("fix", require_fix());
   hljs.registerLanguage("flix", require_flix());
   hljs.registerLanguage("fortran", require_fortran());
+  hljs.registerLanguage("freedesktop", require_freedesktop());
   hljs.registerLanguage("fsharp", require_fsharp());
   hljs.registerLanguage("gams", require_gams());
   hljs.registerLanguage("gauss", require_gauss());
@@ -51254,7 +51850,7 @@ var require_lib = __commonJS((exports, module) => {
 });
 
 // package.json
-var require_package = __commonJS((exports, module) => {
+var require_package = __commonJS(function(exports, module) {
   module.exports = {
     name: "hylite",
     version: "1.0.7",
@@ -51289,17 +51885,17 @@ var require_package = __commonJS((exports, module) => {
       postinstall: "bun run build && bunx biome migrate --write"
     },
     devDependencies: {
-      "@biomejs/biome": "2.3.8",
-      "bun-types": "1.3.4",
+      "@biomejs/biome": "2.5.15",
+      "bun-types": "1.4.3",
       husky: "^9.1.7",
-      np: "^10.2.0"
+      np: "^10.3.0"
     },
     peerDependencies: {
       typescript: "^5.9.3"
     },
     dependencies: {
       commander: "^14.0.2",
-      "highlight.js": "^11.11.1"
+      "highlight.js": "^11.12.0"
     },
     engines: {
       node: "^16 || ^18 || ^20 || ^21 || ^22",
@@ -51308,33 +51904,78 @@ var require_package = __commonJS((exports, module) => {
   };
 });
 
+// node_modules/commander/index.js
+var exports_commander = {};
+__exportCjs(exports_commander, {
+  program: () => $program,
+  createCommand: () => $createCommand,
+  createOption: () => $createOption,
+  createArgument: () => $createArgument,
+  Command: () => $Command,
+  Option: () => $Option,
+  Argument: () => $Argument,
+  Help: () => $Help,
+  CommanderError: () => $CommanderError,
+  InvalidArgumentError: () => $InvalidArgumentError,
+  InvalidOptionArgumentError: () => $InvalidOptionArgumentError
+}, {
+  program: (value) => $program = value,
+  createCommand: (value) => $createCommand = value,
+  createOption: (value) => $createOption = value,
+  createArgument: (value) => $createArgument = value,
+  Command: (value) => $Command = value,
+  Option: (value) => $Option = value,
+  Argument: (value) => $Argument = value,
+  Help: (value) => $Help = value,
+  CommanderError: (value) => $CommanderError = value,
+  InvalidArgumentError: (value) => $InvalidArgumentError = value,
+  InvalidOptionArgumentError: (value) => $InvalidOptionArgumentError = value
+});
+
 // src/index.ts
 import fs, { existsSync } from "fs";
 import { readdir, readFile, writeFile } from "fs/promises";
 import { extname } from "path";
 
+// node_modules/commander/index.js
+var { Argument } = require_argument();
+var { Command } = require_command();
+var { CommanderError, InvalidArgumentError } = require_error();
+var { Help } = require_help();
+var { Option } = require_option();
+var $program = new Command;
+var $createCommand = (name) => new Command(name);
+var $createOption = (flags, description) => new Option(flags, description);
+var $createArgument = (name, description) => new Argument(name, description);
+var $Command = Command;
+var $Option = Option;
+var $Argument = Argument;
+var $Help = Help;
+var $CommanderError = CommanderError;
+var $InvalidArgumentError = InvalidArgumentError;
+var $InvalidOptionArgumentError = InvalidArgumentError;
+
 // node_modules/commander/esm.mjs
-var import__ = __toESM(require_commander(), 1);
 var {
   program,
   createCommand,
   createArgument,
   createOption,
-  CommanderError,
-  InvalidArgumentError,
+  CommanderError: CommanderError2,
+  InvalidArgumentError: InvalidArgumentError2,
   InvalidOptionArgumentError,
-  Command,
-  Argument,
-  Option,
-  Help
-} = import__.default;
+  Command: Command2,
+  Argument: Argument2,
+  Option: Option2,
+  Help: Help2
+} = exports_commander;
 
 // node_modules/highlight.js/es/index.js
 var import_lib = __toESM(require_lib(), 1);
 var es_default = import_lib.default;
 
 // src/index.ts
-var program2 = new Command;
+var program2 = new Command2;
 program2.description("Highlights source code to HTML").option("-l, --language <language>", "name of language").option("-c, --css [language]", "print out the CSS").option("-w, --wrapped", "put the output in a full HTML page").option("--html-wrap", "put the output in a full HTML page").option("-p, --preview-server", "Start a server to preview the output").option("-o, --output-file <path>", "To file instead of stdout").option("--list-css", "List possible names for CSS files and exit").option("--version", "Prints the current version").argument("[string]", "string to highlight");
 program2.parse(process.argv);
 var options = program2.opts();
@@ -51379,7 +52020,7 @@ main(code, {
   listCss: options.listCss,
   version: options.version
 });
-async function main(code2, {
+async function main(code, {
   wrapped = false,
   htmlWrap = false,
   language = "",
@@ -51406,24 +52047,24 @@ async function main(code2, {
     css = "default";
   }
   let cssContent = "";
-  if (css && !code2 && !previewServer) {
+  if (css && !code && !previewServer) {
     cssContent = await readFile(`node_modules/highlight.js/styles/${css}.css`, "utf-8");
     process.stdout.write(cssContent);
     return;
   }
-  if (!code2) {
+  if (!code) {
     throw new Error("No code to highlight");
   }
-  const output = language ? es_default.highlight(code2, { language }).value : es_default.highlightAuto(code2).value;
+  const output = language ? es_default.highlight(code, { language }).value : es_default.highlightAuto(code).value;
   if (previewServer) {
     const codeOutput = `<code class="hljs">${output}</code>`;
     startServer(codeOutput, css || "");
   } else if (htmlWrap) {
     const cssName = typeof css === "string" ? css : "default";
-    const cssContent2 = await getCSS(cssName);
+    const cssContent = await getCSS(cssName);
     const codeOutput = `<code class="hljs">${output}</code>`;
     const headStyle = getHeadStyle(cssName);
-    const html = HTML_TEMPLATE.replace("</head>", `${headStyle}</head>`).replace("__CODE__", codeOutput).replace("__CSS__", cssContent2);
+    const html = HTML_TEMPLATE.replace("</head>", `${headStyle}</head>`).replace("__CODE__", codeOutput).replace("__CSS__", cssContent);
     if (outputFile) {
       await writeFile(outputFile, html, "utf-8");
     } else {
@@ -51457,7 +52098,7 @@ function getHeadStyle(cssName) {
 }`;
   return `<style type="text/css">${mainCSS}</style>`;
 }
-function startServer(code2, cssName = "", port = 3000) {
+function startServer(code, cssName = "", port = 3000) {
   Bun.serve({
     port,
     async fetch(req) {
@@ -51483,7 +52124,7 @@ function startServer(code2, cssName = "", port = 3000) {
           }
         }
         const headStyle = getHeadStyle(loadedCssName);
-        return new Response(HTML_TEMPLATE.replace("</head>", `${headStyle}${choicesStyle}</head>`).replace("<body>", `<body>${choicesHtml}`).replace("__CODE__", code2).replace("__CSS__", css), {
+        return new Response(HTML_TEMPLATE.replace("</head>", `${headStyle}${choicesStyle}</head>`).replace("<body>", `<body>${choicesHtml}`).replace("__CODE__", code).replace("__CSS__", css), {
           headers: new Headers({
             "Content-Type": "text/html; charset=utf-8"
           })
